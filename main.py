@@ -23,10 +23,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:*",
-        "http://127.0.0.1:*",
-        "https://*.web.app",  # Firebase hosting
-        "https://*.firebaseapp.com",
+        "http://localhost:8080",
+        "http://localhost:3000",
+        "http://127.0.0.1:8080",
+        "https://empathink-66fb2.web.app",
+        "https://empathink-66fb2.firebaseapp.com",
+        "*",  # Allow all origins for development/research
     ],
     allow_credentials=True,
     allow_methods=["*"],
