@@ -25,10 +25,14 @@ async def analyze_image(
     Returns:
         ImageAnalysisResult sa emocijama i face box koordinatama
     """
-    # Provjeri format
-    allowed_formats = ["image/jpeg", "image/png", "image/webp", "image/jpg"]
+    # Provjeri format - be flexible with content types
+    allowed_formats = [
+        "image/jpeg", "image/png", "image/webp", "image/jpg",
+        "application/octet-stream",  # Sometimes sent by web browsers
+    ]
 
-    if image.content_type not in allowed_formats:
+    # Skip content type check if None or octet-stream (will validate by actually reading image)
+    if image.content_type and image.content_type not in allowed_formats:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported image format: {image.content_type}. "
