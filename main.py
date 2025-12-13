@@ -1,0 +1,78 @@
+"""
+EmpaThink AI Backend
+Multimodal Emotion Analysis API
+
+Author: Selma Skopljaković Hubljar
+PhD Research: Trusted Empathic AI
+"""
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from api.routes import text, voice, image, websocket_routes
+import uvicorn
+
+app = FastAPI(
+    title="EmpaThink AI Backend",
+    description="Multimodal Emotion Analysis API for PhD Research on Trusted Empathic AI",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+# CORS middleware - dozvoli Flutter app
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:*",
+        "http://127.0.0.1:*",
+        "https://*.web.app",  # Firebase hosting
+        "https://*.firebaseapp.com",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(text.router, prefix="/analyze", tags=["Text Analysis"])
+app.include_router(voice.router, prefix="/analyze", tags=["Voice Analysis"])
+app.include_router(image.router, prefix="/analyze", tags=["Image Analysis"])
+app.include_router(websocket_routes.router, prefix="/live", tags=["Live Camera"])
+
+
+@app.get("/")
+async def root():
+    return {
+        "message": "EmpaThink AI Backend",
+        "version": "1.0.0",
+        "endpoints": {
+            "text": "/analyze/text",
+            "voice": "/analyze/voice",
+            "image": "/analyze/image",
+            "live_camera": "/live/camera (WebSocket)",
+            "docs": "/docs"
+        }
+    }
+
+
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "version": "1.0.0",
+        "services": {
+            "text_analysis": "ready",
+            "voice_analysis": "ready",
+            "image_analysis": "ready",
+            "live_camera": "ready"
+        }
+    }
+
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True  # Development mode
+    )
