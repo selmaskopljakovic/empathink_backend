@@ -63,6 +63,8 @@ async def get_voice_models():
     """
     Vraća informacije o modelima za voice analizu.
     """
+    ml_available = voice_analyzer._is_ml_available()
+
     return {
         "feature_extraction": {
             "library": "librosa",
@@ -78,10 +80,14 @@ async def get_voice_models():
             ]
         },
         "emotion_detection": {
-            "method": "acoustic_feature_analysis",
-            "emotions": ["neutral", "happy", "sad", "angry", "fear"],
-            "based_on": "Speech emotion research literature"
+            "method": "wav2vec2_with_acoustic_features" if ml_available else "acoustic_feature_analysis",
+            "model": "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition" if ml_available else "heuristic",
+            "model_type": "Wav2Vec2-Large-XLSR" if ml_available else "Rule-based",
+            "training_data": "RAVDESS + TESS" if ml_available else "N/A",
+            "emotions": ["anger", "disgust", "fear", "joy", "sadness", "surprise", "neutral"],
+            "ml_available": ml_available,
         },
         "supported_formats": ["WAV", "MP3", "M4A", "OGG", "WebM"],
-        "max_file_size": "10MB"
+        "max_file_size": "10MB",
+        "max_audio_duration": "30 seconds"
     }

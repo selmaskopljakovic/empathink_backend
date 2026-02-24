@@ -1,41 +1,84 @@
 """
 Face Emotion Analyzer Service
-Uses FER and MediaPipe for facial expression recognition
+Uses FER/DeepFace for facial expression recognition with MTCNN face detection.
+Supports backend switching between FER (FER2013) and DeepFace (AffectNet).
 """
 
 import time
+import os
 import numpy as np
 from typing import Dict, Optional, List
 from datetime import datetime
 import io
 import base64
 
+# Backend selection: "deepface" (better accuracy, AffectNet) or "fer" (lighter, FER2013)
+FACE_BACKEND = os.environ.get("FACE_BACKEND", "deepface")
+
 
 class FaceEmotionAnalyzer:
     """
     Analizira slike lica i detektuje emocije koristeći:
-    - FER (Facial Expression Recognition) biblioteku
-    - MediaPipe za face detection i landmarks
+    - DeepFace (default): AffectNet dataset, bolja preciznost
+    - FER (fallback): FER2013 dataset, lakši model
+    - MTCNN za face detection
     - OpenCV za image processing
     """
 
-    # Mapiranje FER emocija
+    # FER emotion labels
     EMOTIONS = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
+
+    # Normalizacija FER labela na Ekman standard (isti kao text_analyzer i voice_analyzer)
+    LABEL_NORMALIZATION = {
+        "happy": "joy",
+        "sad": "sadness",
+        "angry": "anger",
+        "disgust": "disgust",
+        "fear": "fear",
+        "surprise": "surprise",
+        "neutral": "neutral",
+    }
+
+    @staticmethod
+    def _normalize_emotions(emotions: Dict[str, float]) -> Dict[str, float]:
+        """Normalizira FER labele (happy/sad/angry) na standard (joy/sadness/anger)."""
+        return {
+            FaceEmotionAnalyzer.LABEL_NORMALIZATION.get(k, k): v
+            for k, v in emotions.items()
+        }
 
     def __init__(self):
         self._fer_detector = None
+        self._deepface = None
+        self._backend = FACE_BACKEND
         self._is_initialized = False
 
     def _initialize(self):
-        """Lazy initialization FER detektora"""
+        """Lazy initialization of face emotion detector"""
         if self._is_initialized:
             return
 
+        if self._backend == "deepface":
+            try:
+                from deepface import DeepFace
+                self._deepface = DeepFace
+                self._is_initialized = True
+                print("DeepFace initialized (AffectNet backend)")
+            except ImportError:
+                print("DeepFace not available, falling back to FER")
+                self._backend = "fer"
+                self._initialize_fer()
+        else:
+            self._initialize_fer()
+
+    def _initialize_fer(self):
+        """Initialize FER detector as fallback"""
         try:
             from fer import FER
-            # Koristi MTCNN za bolju detekciju lica
             self._fer_detector = FER(mtcnn=True)
             self._is_initialized = True
+            self._backend = "fer"
+            print("FER initialized (FER2013 backend)")
         except Exception as e:
             print(f"FER initialization error: {e}")
             self._is_initialized = False
@@ -55,11 +98,9 @@ class FaceEmotionAnalyzer:
 
         try:
             import cv2
-            from fer import FER
 
-            # Inicijaliziraj FER ako nije
-            if self._fer_detector is None:
-                self._fer_detector = FER(mtcnn=True)
+            # Lazy initialize
+            self._initialize()
 
             # Učitaj sliku iz bytes
             nparr = np.frombuffer(image_data, np.uint8)
@@ -71,8 +112,14 @@ class FaceEmotionAnalyzer:
             # Konvertuj u RGB
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-            # Detektuj emocije
-            result = self._fer_detector.detect_emotions(img_rgb)
+            # Detektuj emocije — DeepFace ili FER
+            if self._backend == "deepface" and self._deepface is not None:
+                result = self._analyze_with_deepface(img_rgb)
+            else:
+                if self._fer_detector is None:
+                    from fer import FER
+                    self._fer_detector = FER(mtcnn=True)
+                result = self._fer_detector.detect_emotions(img_rgb)
 
             if not result:
                 return {
@@ -98,9 +145,13 @@ class FaceEmotionAnalyzer:
             # Konvertuj u procente
             emotions_percent = {k: round(v * 100, 1) for k, v in emotions.items()}
 
-            # Pronađi primarnu emociju
-            primary_emotion = max(emotions, key=emotions.get)
-            confidence = round(emotions[primary_emotion] * 100, 1)
+            # Pronađi primarnu emociju (FER labele za XAI)
+            primary_emotion_fer = max(emotions, key=emotions.get)
+            confidence = round(emotions[primary_emotion_fer] * 100, 1)
+
+            # Normaliziraj labele: happy→joy, sad→sadness, angry→anger
+            emotions_normalized = self._normalize_emotions(emotions_percent)
+            primary_emotion = self.LABEL_NORMALIZATION.get(primary_emotion_fer, primary_emotion_fer)
 
             # Face box
             face_box = {
@@ -110,17 +161,17 @@ class FaceEmotionAnalyzer:
                 "height": int(box[3])
             }
 
-            # XAI objašnjenje
+            # XAI objašnjenje (koristi FER labele jer FACS mapiranje koristi originalne)
             xai_explanation = None
             if include_xai:
-                xai_explanation = self._generate_explanation(emotions_percent, primary_emotion)
+                xai_explanation = self._generate_explanation(emotions_percent, primary_emotion_fer)
 
             processing_time = (time.time() - start_time) * 1000
 
             return {
                 "success": True,
                 "face_detected": True,
-                "emotions": emotions_percent,
+                "emotions": emotions_normalized,
                 "primary_emotion": primary_emotion,
                 "confidence": confidence,
                 "face_box": face_box,
@@ -182,8 +233,12 @@ class FaceEmotionAnalyzer:
                 }
 
             face = result[0]
-            emotions = {k: round(v * 100, 1) for k, v in face["emotions"].items()}
-            primary = max(emotions, key=emotions.get)
+            emotions_raw = {k: round(v * 100, 1) for k, v in face["emotions"].items()}
+
+            # Normaliziraj labele: happy→joy, sad→sadness, angry→anger
+            emotions = self._normalize_emotions(emotions_raw)
+            primary_fer = max(emotions_raw, key=emotions_raw.get)
+            primary = self.LABEL_NORMALIZATION.get(primary_fer, primary_fer)
 
             # Skaliraj box nazad
             box = face["box"]
@@ -211,6 +266,56 @@ class FaceEmotionAnalyzer:
                 "error": str(e),
                 "timestamp": time.time()
             }
+
+    def _analyze_with_deepface(self, img_rgb: np.ndarray) -> List[Dict]:
+        """
+        Analyze face using DeepFace (AffectNet backend).
+        Returns result in same format as FER for compatibility.
+        """
+        try:
+            results = self._deepface.analyze(
+                img_path=img_rgb,
+                actions=['emotion'],
+                enforce_detection=False,
+                detector_backend='opencv',  # Faster than mtcnn for DeepFace
+                silent=True,
+            )
+
+            if not results:
+                return []
+
+            # DeepFace returns list of dicts or single dict
+            if isinstance(results, dict):
+                results = [results]
+
+            converted = []
+            for face in results:
+                emotions = face.get("emotion", {})
+                # DeepFace returns 0-100 scores, normalize to 0-1 for FER compat
+                emotions_normalized = {k.lower(): v / 100.0 for k, v in emotions.items()}
+
+                region = face.get("region", {})
+                box = (
+                    region.get("x", 0),
+                    region.get("y", 0),
+                    region.get("w", 0),
+                    region.get("h", 0),
+                )
+
+                converted.append({
+                    "emotions": emotions_normalized,
+                    "box": box,
+                })
+
+            return converted
+
+        except Exception as e:
+            print(f"DeepFace analysis error: {e}, falling back to FER")
+            # Fallback to FER
+            if self._fer_detector is None:
+                from fer import FER
+                self._fer_detector = FER(mtcnn=True)
+            return self._fer_detector.detect_emotions(img_rgb)
 
     def _generate_explanation(self, emotions: Dict[str, float], primary_emotion: str) -> Dict:
         """Generiše XAI objašnjenje za face analizu"""

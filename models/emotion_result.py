@@ -32,6 +32,24 @@ class TextMetrics(BaseModel):
     word_count: int
 
 
+class ShapWordImportance(BaseModel):
+    """Pojedinačni doprinos riječi prema SHAP analizi"""
+    word: str
+    contribution: float
+    direction: str  # "positive" or "negative"
+    rank: int
+
+
+class ShapExplanation(BaseModel):
+    """SHAP objašnjenje sa word-level važnostima"""
+    method: str  # "shap_partition"
+    model: str  # "distilroberta-emotion"
+    target_emotion: str
+    word_importance: List[ShapWordImportance]
+    truncated: bool = False
+    num_words_analyzed: int
+
+
 class XAIExplanation(BaseModel):
     """XAI objašnjenje za Group B korisnike"""
     method: str
@@ -40,6 +58,7 @@ class XAIExplanation(BaseModel):
     key_indicators: Optional[List[str]] = None
     facial_action_units: Optional[List[str]] = None
     key_features: Optional[Dict[str, str]] = None
+    shap_explanation: Optional[ShapExplanation] = None
 
 
 class TextAnalysisResult(BaseModel):
@@ -109,8 +128,17 @@ class LiveFrameResult(BaseModel):
     timestamp: float
 
 
+class IncongruenceResult(BaseModel):
+    """Detekcija emocionalne nekongruencije između modaliteta"""
+    is_incongruent: bool = False
+    overall_score: float = 0.0           # 0-1, higher = more incongruent
+    pairwise_similarities: Dict[str, float] = {}  # e.g. {"text_vs_face": 0.72}
+    details: Optional[str] = None
+    possible_masking: bool = False        # True if high incongruence suggests masking
+
+
 class FusedEmotionResult(BaseModel):
-    """Kombinovani rezultat iz svih modaliteta"""
+    """Kombinovani rezultat iz svih modaliteta sa detekcijom nekongruencije"""
     success: bool = True
     final_emotions: Dict[str, float]
     primary_emotion: str
@@ -118,7 +146,8 @@ class FusedEmotionResult(BaseModel):
     modalities_used: List[str]
     weights: Dict[str, float]
     individual_results: Dict[str, Dict[str, float]]
-    xai_explanation: XAIExplanation
+    incongruence: Optional[IncongruenceResult] = None
+    xai_explanation: Optional[Dict] = None
     processing_time_ms: float
     timestamp: datetime
 

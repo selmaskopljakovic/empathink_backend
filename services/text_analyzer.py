@@ -179,6 +179,14 @@ class TextEmotionAnalyzer:
                 "word_count": len(text.split())
             }
 
+    def _is_shap_available(self) -> bool:
+        """Check if SHAP explainer is available."""
+        try:
+            from services.shap_explainer import shap_explainer
+            return shap_explainer.is_available()
+        except Exception:
+            return False
+
     def _generate_explanation(
         self,
         text: str,
@@ -188,6 +196,43 @@ class TextEmotionAnalyzer:
     ) -> Dict:
         """
         Generiše XAI objašnjenje za detektovane emocije.
+        Pokušava SHAP prvo, fallback na keyword analizu.
+        Ovo se prikazuje samo korisnicima u Group B.
+        """
+        # Try SHAP first
+        if self._is_shap_available():
+            try:
+                from services.shap_explainer import shap_explainer
+                shap_result = shap_explainer.explain(
+                    text=text,
+                    primary_emotion=primary_emotion,
+                    top_n=10,
+                )
+                if shap_result is not None:
+                    # Build explanation with SHAP data
+                    keyword_explanation = self._generate_keyword_explanation(
+                        text, emotions, primary_emotion, confidence
+                    )
+                    keyword_explanation["method"] = "shap_transformer_analysis"
+                    keyword_explanation["shap_explanation"] = shap_result
+                    return keyword_explanation
+            except Exception as e:
+                print(f"SHAP explanation failed, falling back to keyword: {e}")
+
+        # Fallback to keyword-based explanation
+        return self._generate_keyword_explanation(
+            text, emotions, primary_emotion, confidence
+        )
+
+    def _generate_keyword_explanation(
+        self,
+        text: str,
+        emotions: Dict[str, float],
+        primary_emotion: str,
+        confidence: float
+    ) -> Dict:
+        """
+        Generiše keyword-bazirano XAI objašnjenje (fallback metoda).
         Ovo se prikazuje samo korisnicima u Group B.
         """
         # Ključne riječi koje ukazuju na emocije

@@ -8,7 +8,7 @@ PhD Research: Trusted Empathic AI
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import text, voice, image, websocket_routes
+from api.routes import text, voice, image, websocket_routes, multimodal
 import uvicorn
 
 app = FastAPI(
@@ -40,6 +40,7 @@ app.include_router(text.router, prefix="/analyze", tags=["Text Analysis"])
 app.include_router(voice.router, prefix="/analyze", tags=["Voice Analysis"])
 app.include_router(image.router, prefix="/analyze", tags=["Image Analysis"])
 app.include_router(websocket_routes.router, prefix="/live", tags=["Live Camera"])
+app.include_router(multimodal.router, prefix="/analyze", tags=["Multimodal Fusion"])
 
 
 @app.get("/")
@@ -51,6 +52,7 @@ async def root():
             "text": "/analyze/text",
             "voice": "/analyze/voice",
             "image": "/analyze/image",
+            "multimodal": "/analyze/multimodal",
             "live_camera": "/live/camera (WebSocket)",
             "docs": "/docs"
         }
@@ -66,6 +68,7 @@ async def health_check():
             "text_analysis": "ready",
             "voice_analysis": "ready",
             "image_analysis": "ready",
+            "multimodal_fusion": "ready",
             "live_camera": "ready"
         }
     }
