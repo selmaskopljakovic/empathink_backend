@@ -118,6 +118,30 @@ class ImageAnalysisResult(BaseModel):
     timestamp: datetime
 
 
+class MaskingSignal(BaseModel):
+    """Pojedinacni signal maskiranja iz jednog sloja analize"""
+    layer: str              # "distribution", "temporal", "landmarks"
+    type: str               # "fake_smile", "suppressed_anger", etc.
+    confidence: float       # 0-1
+    detail: str             # Human-readable opis
+
+
+class MaskingResult(BaseModel):
+    """Rezultat detekcije maskiranih emocija (lazni osmijeh, potisnute emocije)"""
+    detected: bool = False
+    type: Optional[str] = None                      # "fake_smile", "suppressed_anger", etc.
+    confidence: float = 0.0                          # 0-1
+    surface_emotion: Optional[str] = None            # Prikazana emocija
+    underlying_emotion: Optional[str] = None         # Moguca skrivena emocija
+    layers_triggered: List[str] = []                 # Koji slojevi su detektovali
+    num_signals: int = 0
+    signals: List[MaskingSignal] = []
+    explanation: Optional[Dict] = None               # XAI objasnjenje
+    au6_score: Optional[float] = None                # Cheek raiser (Duchenne)
+    au12_score: Optional[float] = None               # Lip corner puller
+    is_duchenne: Optional[bool] = None               # Da li je Duchenne osmijeh
+
+
 class LiveFrameResult(BaseModel):
     """Rezultat jednog frame-a iz live kamere"""
     face_detected: bool
@@ -125,6 +149,7 @@ class LiveFrameResult(BaseModel):
     primary_emotion: Optional[str] = None
     confidence: float = 0.0
     face_box: Optional[FaceBox] = None
+    masking: Optional[MaskingResult] = None
     timestamp: float
 
 

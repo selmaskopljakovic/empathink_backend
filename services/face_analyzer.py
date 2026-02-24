@@ -12,6 +12,8 @@ from datetime import datetime
 import io
 import base64
 
+from services.masking_detector import masking_detector
+
 # Backend selection: "deepface" (better accuracy, AffectNet) or "fer" (lighter, FER2013)
 FACE_BACKEND = os.environ.get("FACE_BACKEND", "deepface")
 
@@ -166,9 +168,19 @@ class FaceEmotionAnalyzer:
             if include_xai:
                 xai_explanation = self._generate_explanation(emotions_percent, primary_emotion_fer)
 
+            # Masking detection
+            masking_result = None
+            try:
+                masking_result = masking_detector.analyze_frame(
+                    emotions=emotions_normalized,
+                    image_rgb=img_rgb,
+                )
+            except Exception as e:
+                print(f"Masking detection error: {e}")
+
             processing_time = (time.time() - start_time) * 1000
 
-            return {
+            result = {
                 "success": True,
                 "face_detected": True,
                 "emotions": emotions_normalized,
@@ -180,17 +192,27 @@ class FaceEmotionAnalyzer:
                 "timestamp": datetime.now().isoformat()
             }
 
+            if masking_result:
+                result["masking"] = masking_result
+
+            return result
+
         except Exception as e:
             print(f"Face analysis error: {e}")
             return self._error_result(str(e))
 
-    def analyze_frame_fast(self, frame_base64: str) -> Dict:
+    def analyze_frame_fast(
+        self,
+        frame_base64: str,
+        emotion_history: Optional[List[Dict[str, float]]] = None,
+    ) -> Dict:
         """
         Brza analiza jednog frame-a za live camera.
         Ne koristi MTCNN za veću brzinu.
 
         Args:
             frame_base64: Base64 encoded frame
+            emotion_history: Lista prethodnih emocija za temporalnu analizu maskiranja
 
         Returns:
             Dict sa emocijama za real-time prikaz
@@ -249,7 +271,19 @@ class FaceEmotionAnalyzer:
                 "height": int(box[3] / scale)
             }
 
-            return {
+            # Masking detection (koristi originalni frame za landmarks)
+            masking_result = None
+            try:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                masking_result = masking_detector.analyze_frame(
+                    emotions=emotions,
+                    image_rgb=frame_rgb,
+                    emotion_history=emotion_history,
+                )
+            except Exception as e:
+                print(f"Masking detection error (fast): {e}")
+
+            response = {
                 "face_detected": True,
                 "emotions": emotions,
                 "primary_emotion": primary,
@@ -257,6 +291,11 @@ class FaceEmotionAnalyzer:
                 "face_box": face_box,
                 "timestamp": time.time()
             }
+
+            if masking_result:
+                response["masking"] = masking_result
+
+            return response
 
         except Exception as e:
             print(f"Fast frame analysis error: {e}")
