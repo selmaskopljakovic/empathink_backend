@@ -1,0 +1,354 @@
+"""
+ConversationEngine - Gemini 2.0 Flash powered empathic conversation service.
+
+Generates empathic AI responses based on detected emotions, masking signals,
+user messages, and head gestures. Designed for PhD research on Trusted Empathic AI.
+"""
+
+import os
+import time
+import json
+from datetime import datetime
+from typing import Dict, List, Optional
+
+# Gemini API
+try:
+    import google.generativeai as genai
+
+    _GEMINI_AVAILABLE = True
+except ImportError:
+    _GEMINI_AVAILABLE = False
+    print("google-generativeai not installed - conversation engine disabled")
+
+
+SYSTEM_PROMPT_TEMPLATE = """Ti si EmpaThink AI sagovornik - empatičan, topao i pažljiv.
+
+PRAVILA:
+- Govori kratko (2-3 rečenice max)
+- Koristi Bosnian/Serbian/Croatian jezik
+- Komentariši facijalne ekspresije prirodno, kao prijatelj ("Vidim da ti je pogled malo umoran", "Čini mi se da ti se osmijeh probija")
+- NIKADA ne dijagnosticiraj i ne igraj terapeuta
+- Postavljaj otvorena pitanja
+- Budi autentičan, ne pretjerano sladunjav
+- Ako korisnik koristi engleski, odgovori na engleskom
+
+KONTEKST:
+- Vrijeme dana: {time_of_day}
+- Trenutne emocije korisnika: {emotions}
+- Primarna emocija: {primary_emotion} ({confidence}% sigurnost)
+{masking_context}
+{gesture_context}
+
+HISTORIJA RAZGOVORA:
+{conversation_history}
+
+Odgovori u JSON formatu:
+{{"text": "tvoj odgovor", "emotion_observation": "kratak komentar o emocijama ili null", "suggested_actions": []}}
+
+Za suggested_actions koristi: "ask_confirmation" kad trebaš da/ne odgovor, "suggest_break" kad vidiš umor, "encourage" kad vidiš pozitivne emocije.
+"""
+
+GREETING_TEMPLATES = {
+    "morning": "Dobro jutro! ☀️ Kako si započeo/la dan?",
+    "afternoon": "Dobar dan! Kako ide danas?",
+    "evening": "Dobro veče! Kako je prošao dan?",
+    "night": "Kasno je... Sve ok? Kako se osjećaš?",
+}
+
+FALLBACK_RESPONSES = [
+    {
+        "text": "Hvala ti što dijeliš to sa mnom. Kako se osjećaš u vezi s tim?",
+        "emotion_observation": None,
+        "suggested_actions": [],
+    },
+    {
+        "text": "Razumijem. Želiš li mi reći više o tome?",
+        "emotion_observation": None,
+        "suggested_actions": [],
+    },
+    {
+        "text": "Tu sam za tebe. Nastavi kad budeš spreman/spremna.",
+        "emotion_observation": None,
+        "suggested_actions": [],
+    },
+]
+
+
+class ConversationEngine:
+    """Manages empathic conversation sessions using Gemini 2.0 Flash."""
+
+    def __init__(self):
+        self._sessions: Dict[str, dict] = {}
+        self._model = None
+        self._initialized = False
+        self._fallback_index = 0
+
+    def _initialize(self):
+        """Lazy initialization of Gemini API."""
+        if self._initialized:
+            return
+
+        if not _GEMINI_AVAILABLE:
+            print("Gemini API not available - using fallback mode")
+            self._initialized = True
+            return
+
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            print("GEMINI_API_KEY not set - using fallback mode")
+            self._initialized = True
+            return
+
+        try:
+            genai.configure(api_key=api_key)
+            self._model = genai.GenerativeModel("gemini-2.0-flash")
+            self._initialized = True
+            print("Gemini 2.0 Flash initialized successfully")
+        except Exception as e:
+            print(f"Gemini initialization error: {e}")
+            self._initialized = True
+
+    def _get_time_of_day(self) -> str:
+        """Returns time-of-day category."""
+        hour = datetime.now().hour
+        if 5 <= hour < 12:
+            return "morning"
+        elif 12 <= hour < 17:
+            return "afternoon"
+        elif 17 <= hour < 21:
+            return "evening"
+        else:
+            return "night"
+
+    def start_session(self, session_id: str) -> dict:
+        """Start a new conversation session with time-aware greeting."""
+        self._initialize()
+
+        time_of_day = self._get_time_of_day()
+        greeting = GREETING_TEMPLATES[time_of_day]
+
+        self._sessions[session_id] = {
+            "history": [],
+            "emotions_timeline": [],
+            "start_time": time.time(),
+            "last_masking_mention": 0,
+            "message_count": 0,
+        }
+
+        # Add greeting to history
+        self._sessions[session_id]["history"].append(
+            {"role": "ai", "text": greeting, "timestamp": time.time()}
+        )
+
+        return {
+            "text": greeting,
+            "emotion_observation": None,
+            "suggested_actions": [],
+        }
+
+    def generate_response(
+        self,
+        session_id: str,
+        emotions: Optional[Dict[str, float]] = None,
+        masking: Optional[dict] = None,
+        user_message: Optional[str] = None,
+        gesture: Optional[str] = None,
+    ) -> dict:
+        """Generate empathic AI response based on current context."""
+        self._initialize()
+
+        if session_id not in self._sessions:
+            self.start_session(session_id)
+
+        session = self._sessions[session_id]
+        session["message_count"] += 1
+
+        # Track emotions
+        if emotions:
+            session["emotions_timeline"].append(
+                {"emotions": emotions, "timestamp": time.time()}
+            )
+
+        # Add user message to history
+        if user_message:
+            session["history"].append(
+                {"role": "user", "text": user_message, "timestamp": time.time()}
+            )
+
+        if gesture and gesture != "none":
+            gesture_text = "da" if gesture == "nod" else "ne"
+            session["history"].append(
+                {
+                    "role": "user",
+                    "text": f"[Korisnik klimnuo glavom: {gesture_text}]",
+                    "timestamp": time.time(),
+                }
+            )
+
+        # Build context
+        time_of_day = self._get_time_of_day()
+
+        emotions_str = "Nije detektovano"
+        primary_emotion = "nepoznato"
+        confidence = 0
+        if emotions:
+            sorted_emotions = sorted(emotions.items(), key=lambda x: x[1], reverse=True)
+            emotions_str = ", ".join(
+                [f"{e}: {v:.1f}%" for e, v in sorted_emotions[:4]]
+            )
+            primary_emotion = sorted_emotions[0][0]
+            confidence = int(sorted_emotions[0][1])
+
+        # Masking context with throttling (max once per 30s)
+        masking_context = ""
+        if masking and masking.get("detected"):
+            now = time.time()
+            if now - session["last_masking_mention"] >= 30:
+                masking_type = masking.get("type", "unknown")
+                surface = masking.get("surface_emotion", "")
+                underlying = masking.get("underlying_emotion", "")
+                masking_context = (
+                    f"- MASKING DETEKTOVAN: {masking_type} "
+                    f"(površinska: {surface}, skrivena: {underlying}). "
+                    f"Pažljivo i nježno adresirati."
+                )
+                session["last_masking_mention"] = now
+
+        # Gesture context
+        gesture_context = ""
+        if gesture and gesture != "none":
+            gesture_context = f"- Korisnik je upravo {'klimnuo glavom (DA)' if gesture == 'nod' else 'odmahnuo glavom (NE)'}."
+
+        # Build conversation history string (last 10 messages)
+        history_lines = []
+        for msg in session["history"][-10:]:
+            role = "AI" if msg["role"] == "ai" else "Korisnik"
+            history_lines.append(f"{role}: {msg['text']}")
+        conversation_history = "\n".join(history_lines) if history_lines else "Nema prethodnih poruka."
+
+        # Generate with Gemini or fallback
+        if self._model:
+            try:
+                prompt = SYSTEM_PROMPT_TEMPLATE.format(
+                    time_of_day=time_of_day,
+                    emotions=emotions_str,
+                    primary_emotion=primary_emotion,
+                    confidence=confidence,
+                    masking_context=masking_context,
+                    gesture_context=gesture_context,
+                    conversation_history=conversation_history,
+                )
+
+                response = self._model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.7,
+                        max_output_tokens=300,
+                        response_mime_type="application/json",
+                    ),
+                )
+
+                result = json.loads(response.text)
+
+                # Validate structure
+                result.setdefault("text", "Razumijem. Nastavi...")
+                result.setdefault("emotion_observation", None)
+                result.setdefault("suggested_actions", [])
+
+                # Add to history
+                session["history"].append(
+                    {"role": "ai", "text": result["text"], "timestamp": time.time()}
+                )
+
+                return result
+
+            except Exception as e:
+                print(f"Gemini API error: {e}")
+                return self._get_fallback_response(session)
+        else:
+            return self._get_fallback_response(session)
+
+    def _get_fallback_response(self, session: dict) -> dict:
+        """Return a fallback response when Gemini is unavailable."""
+        response = FALLBACK_RESPONSES[self._fallback_index % len(FALLBACK_RESPONSES)]
+        self._fallback_index += 1
+
+        session["history"].append(
+            {"role": "ai", "text": response["text"], "timestamp": time.time()}
+        )
+
+        return response
+
+    def generate_summary(self, session_id: str) -> dict:
+        """Generate end-of-session conversation summary."""
+        self._initialize()
+
+        if session_id not in self._sessions:
+            return {"summary": "Nema podataka o sesiji.", "message_count": 0}
+
+        session = self._sessions[session_id]
+        duration = time.time() - session["start_time"]
+        message_count = session["message_count"]
+
+        # Calculate dominant emotions across session
+        all_emotions: Dict[str, float] = {}
+        for entry in session["emotions_timeline"]:
+            for emotion, value in entry["emotions"].items():
+                all_emotions[emotion] = all_emotions.get(emotion, 0) + value
+
+        if all_emotions:
+            total = sum(all_emotions.values())
+            avg_emotions = {e: round(v / total * 100, 1) for e, v in all_emotions.items()}
+            dominant = max(avg_emotions, key=avg_emotions.get)
+        else:
+            avg_emotions = {}
+            dominant = "nepoznato"
+
+        # Try Gemini summary or fallback
+        summary_text = (
+            f"Razgovor je trajao {int(duration // 60)} minuta. "
+            f"Razmijenjeno je {message_count} poruka. "
+            f"Dominantna emocija: {dominant}."
+        )
+
+        if self._model and len(session["history"]) > 2:
+            try:
+                history_text = "\n".join(
+                    [
+                        f"{'AI' if m['role'] == 'ai' else 'Korisnik'}: {m['text']}"
+                        for m in session["history"][-20:]
+                    ]
+                )
+                prompt = (
+                    f"Napravi kratak rezime ovog razgovora (2-3 rečenice, na BHS jeziku):\n\n"
+                    f"{history_text}\n\n"
+                    f"Dominantna emocija: {dominant}\n"
+                    f"Odgovori samo tekst rezimea, bez JSON formata."
+                )
+
+                response = self._model.generate_content(
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.5,
+                        max_output_tokens=200,
+                    ),
+                )
+                summary_text = response.text.strip()
+            except Exception as e:
+                print(f"Summary generation error: {e}")
+
+        return {
+            "summary": summary_text,
+            "duration_seconds": round(duration),
+            "message_count": message_count,
+            "average_emotions": avg_emotions,
+            "dominant_emotion": dominant,
+        }
+
+    def cleanup_session(self, session_id: str):
+        """Remove session data from memory."""
+        self._sessions.pop(session_id, None)
+
+
+# Singleton instance
+conversation_engine = ConversationEngine()

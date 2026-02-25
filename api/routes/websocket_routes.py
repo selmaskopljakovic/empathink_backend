@@ -4,8 +4,11 @@ WebSocket Routes for Live Camera Analysis
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from services.face_analyzer import face_analyzer
+from services.conversation_engine import conversation_engine
+from services.head_gesture_detector import head_gesture_detector
 import json
 import asyncio
+import uuid
 
 router = APIRouter()
 
@@ -283,4 +286,194 @@ async def websocket_camera_session(websocket: WebSocket):
         manager.disconnect(websocket)
     except Exception as e:
         print(f"WebSocket session error: {e}")
+        manager.disconnect(websocket)
+
+
+@router.websocket("/camera/conversation")
+async def websocket_camera_conversation(websocket: WebSocket):
+    """
+    WebSocket endpoint za konverzacijski AI sa live kamerom.
+
+    Multipleksira frejmove, tekst, gesture frejmove i sesiju.
+
+    Client → Server:
+    - {"type": "session_start"}
+    - {"type": "frame", "frame": "<base64>"}
+    - {"type": "text_message", "text": "...", "source": "keyboard|voice"}
+    - {"type": "gesture_frames", "frames": ["<base64>", ...]}
+    - {"type": "session_end"}
+
+    Server → Client:
+    - {"type": "emotion_result", ...}
+    - {"type": "ai_message", "text": "...", "emotion_observation": "...", "suggested_actions": [...]}
+    - {"type": "gesture_result", "gesture": "nod|shake|none", "confidence": 0.85}
+    - {"type": "session_summary", ...}
+    """
+    await manager.connect(websocket)
+
+    session_id = str(uuid.uuid4())
+    emotion_history = []
+    max_history = 20
+    frame_count = 0
+    latest_emotions = None
+    latest_masking = None
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+
+            try:
+                message = json.loads(data)
+                msg_type = message.get("type", "")
+
+                if msg_type == "session_start":
+                    # Start conversation session
+                    greeting = conversation_engine.start_session(session_id)
+                    await manager.send_json(websocket, {
+                        "type": "ai_message",
+                        **greeting,
+                    })
+
+                elif msg_type == "frame":
+                    if "frame" not in message:
+                        continue
+
+                    # Analyze frame for emotions (non-blocking)
+                    result = await asyncio.to_thread(
+                        face_analyzer.analyze_frame_fast,
+                        message["frame"],
+                        emotion_history,
+                    )
+
+                    if result.get("face_detected") and result.get("emotions"):
+                        emotion_history.append(result["emotions"])
+                        if len(emotion_history) > max_history:
+                            emotion_history.pop(0)
+                        latest_emotions = result["emotions"]
+                        latest_masking = result.get("masking")
+
+                    # Send emotion result
+                    await manager.send_json(websocket, {
+                        "type": "emotion_result",
+                        **result,
+                    })
+
+                    # Proactive AI comment every 5th frame (~10s at 2s intervals)
+                    frame_count += 1
+                    if frame_count % 5 == 0 and latest_emotions:
+                        try:
+                            ai_response = await asyncio.to_thread(
+                                conversation_engine.generate_response,
+                                session_id,
+                                latest_emotions,
+                                latest_masking,
+                                None,  # no user message
+                                None,  # no gesture
+                            )
+                            await manager.send_json(websocket, {
+                                "type": "ai_message",
+                                **ai_response,
+                            })
+                        except Exception as e:
+                            print(f"Proactive AI comment error: {e}")
+
+                elif msg_type == "text_message":
+                    user_text = message.get("text", "").strip()
+                    if not user_text:
+                        continue
+
+                    # Generate AI response with emotion context
+                    try:
+                        ai_response = await asyncio.to_thread(
+                            conversation_engine.generate_response,
+                            session_id,
+                            latest_emotions,
+                            latest_masking,
+                            user_text,
+                            None,  # no gesture
+                        )
+                        await manager.send_json(websocket, {
+                            "type": "ai_message",
+                            **ai_response,
+                        })
+                    except Exception as e:
+                        print(f"Text response error: {e}")
+                        await manager.send_json(websocket, {
+                            "type": "ai_message",
+                            "text": "Hvala ti. Nastavi kad budeš spreman/spremna.",
+                            "emotion_observation": None,
+                            "suggested_actions": [],
+                        })
+
+                elif msg_type == "gesture_frames":
+                    frames = message.get("frames", [])
+                    if not frames:
+                        continue
+
+                    # Detect gesture (non-blocking)
+                    try:
+                        gesture_result = await asyncio.to_thread(
+                            head_gesture_detector.detect_gesture,
+                            frames,
+                        )
+                        await manager.send_json(websocket, {
+                            "type": "gesture_result",
+                            **gesture_result,
+                        })
+
+                        # If nod or shake detected, feed to conversation engine
+                        if gesture_result["gesture"] != "none":
+                            ai_response = await asyncio.to_thread(
+                                conversation_engine.generate_response,
+                                session_id,
+                                latest_emotions,
+                                latest_masking,
+                                None,  # no text
+                                gesture_result["gesture"],
+                            )
+                            await manager.send_json(websocket, {
+                                "type": "ai_message",
+                                **ai_response,
+                            })
+                    except Exception as e:
+                        print(f"Gesture detection error: {e}")
+                        await manager.send_json(websocket, {
+                            "type": "gesture_result",
+                            "gesture": "none",
+                            "confidence": 0.0,
+                        })
+
+                elif msg_type == "session_end":
+                    # Generate session summary
+                    try:
+                        summary = await asyncio.to_thread(
+                            conversation_engine.generate_summary,
+                            session_id,
+                        )
+                        await manager.send_json(websocket, {
+                            "type": "session_summary",
+                            **summary,
+                        })
+                    except Exception as e:
+                        print(f"Summary generation error: {e}")
+                        await manager.send_json(websocket, {
+                            "type": "session_summary",
+                            "summary": "Sesija završena.",
+                            "message_count": frame_count,
+                        })
+                    finally:
+                        conversation_engine.cleanup_session(session_id)
+
+            except json.JSONDecodeError:
+                await manager.send_json(websocket, {
+                    "type": "error",
+                    "message": "Invalid JSON",
+                })
+
+    except WebSocketDisconnect:
+        conversation_engine.cleanup_session(session_id)
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket conversation error: {e}")
+        conversation_engine.cleanup_session(session_id)
         manager.disconnect(websocket)
