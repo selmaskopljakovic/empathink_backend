@@ -9,8 +9,10 @@ import os
 import time
 import json
 import base64
+import io
 from datetime import datetime
 from typing import Dict, List, Optional
+from PIL import Image
 
 # Gemini API
 try:
@@ -382,14 +384,13 @@ class ConversationEngine:
             return None
 
         try:
-            # Decode base64 to bytes for Gemini vision
-            image_bytes = base64.b64decode(frame_base64)
+            # Strip data URL prefix if present (e.g., "data:image/jpeg;base64,...")
+            if "," in frame_base64 and frame_base64.startswith("data:"):
+                frame_base64 = frame_base64.split(",", 1)[1]
 
-            # Create image part for Gemini
-            image_part = {
-                "mime_type": "image/jpeg",
-                "data": image_bytes,
-            }
+            # Decode base64 to PIL Image for Gemini vision
+            image_bytes = base64.b64decode(frame_base64)
+            image = Image.open(io.BytesIO(image_bytes))
 
             prompt = (
                 "Analyze this person's face and body. Return ONLY valid JSON with these fields:\n"
@@ -409,7 +410,7 @@ class ConversationEngine:
             )
 
             response = self._model.generate_content(
-                [prompt, image_part],
+                [prompt, image],
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.3,
                     max_output_tokens=300,
