@@ -301,12 +301,14 @@ async def websocket_camera_conversation(websocket: WebSocket):
     - {"type": "frame", "frame": "<base64>"}
     - {"type": "text_message", "text": "...", "source": "keyboard|voice"}
     - {"type": "gesture_frames", "frames": ["<base64>", ...]}
+    - {"type": "validation", "emotion": "...", "correct": bool}
     - {"type": "session_end"}
 
     Server → Client:
-    - {"type": "emotion_result", ...}
+    - {"type": "emotion_result", ..., "xai_explanation": {...}}
     - {"type": "ai_message", "text": "...", "emotion_observation": "...", "suggested_actions": [...]}
     - {"type": "gesture_result", "gesture": "nod|shake|none", "confidence": 0.85}
+    - {"type": "visual_observation", "observations": {...}, "timestamp": float}
     - {"type": "session_summary", ...}
     """
     await manager.connect(websocket)
@@ -317,6 +319,7 @@ async def websocket_camera_conversation(websocket: WebSocket):
     frame_count = 0
     latest_emotions = None
     latest_masking = None
+    latest_frame_b64 = None  # Store latest frame for Gemini vision
 
     try:
         while True:
@@ -338,6 +341,8 @@ async def websocket_camera_conversation(websocket: WebSocket):
                     if "frame" not in message:
                         continue
 
+                    latest_frame_b64 = message["frame"]
+
                     # Analyze frame for emotions (non-blocking)
                     result = await asyncio.to_thread(
                         face_analyzer.analyze_frame_fast,
@@ -352,7 +357,7 @@ async def websocket_camera_conversation(websocket: WebSocket):
                         latest_emotions = result["emotions"]
                         latest_masking = result.get("masking")
 
-                    # Send emotion result
+                    # Send emotion result (now includes xai_explanation from face_analyzer)
                     await manager.send_json(websocket, {
                         "type": "emotion_result",
                         **result,
@@ -376,6 +381,23 @@ async def websocket_camera_conversation(websocket: WebSocket):
                             })
                         except Exception as e:
                             print(f"Proactive AI comment error: {e}")
+
+                    # Gemini vision analysis every 5th frame for visual observations
+                    if frame_count % 5 == 0 and latest_frame_b64:
+                        try:
+                            observations = await asyncio.to_thread(
+                                conversation_engine.analyze_visual_details,
+                                latest_frame_b64,
+                            )
+                            if observations:
+                                import time
+                                await manager.send_json(websocket, {
+                                    "type": "visual_observation",
+                                    "observations": observations,
+                                    "timestamp": time.time(),
+                                })
+                        except Exception as e:
+                            print(f"Gemini vision analysis error: {e}")
 
                 elif msg_type == "text_message":
                     user_text = message.get("text", "").strip()
@@ -404,6 +426,31 @@ async def websocket_camera_conversation(websocket: WebSocket):
                             "emotion_observation": None,
                             "suggested_actions": [],
                         })
+
+                elif msg_type == "validation":
+                    # Handle user emotion validation
+                    emotion = message.get("emotion", "")
+                    correct = message.get("correct", False)
+                    print(f"[Validation] emotion={emotion}, correct={correct}, session={session_id}")
+
+                    # Feed validation context to conversation engine
+                    if not correct and emotion:
+                        try:
+                            validation_context = f"[Korisnik kaze da NIJE {emotion}. Pitaj ga kako se zaista osjeca.]"
+                            ai_response = await asyncio.to_thread(
+                                conversation_engine.generate_response,
+                                session_id,
+                                latest_emotions,
+                                latest_masking,
+                                validation_context,
+                                None,
+                            )
+                            await manager.send_json(websocket, {
+                                "type": "ai_message",
+                                **ai_response,
+                            })
+                        except Exception as e:
+                            print(f"Validation response error: {e}")
 
                 elif msg_type == "gesture_frames":
                     frames = message.get("frames", [])

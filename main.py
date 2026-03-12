@@ -6,6 +6,9 @@ Author: Selma Skopljaković Hubljar
 PhD Research: Trusted Empathic AI
 """
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import text, voice, image, websocket_routes, multimodal

@@ -8,6 +8,7 @@ user messages, and head gestures. Designed for PhD research on Trusted Empathic 
 import os
 import time
 import json
+import base64
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -362,6 +363,75 @@ class ConversationEngine:
             "average_emotions": avg_emotions,
             "dominant_emotion": dominant,
         }
+
+    def analyze_visual_details(self, frame_base64: str) -> Optional[Dict]:
+        """
+        Use Gemini Vision API to analyze visual details beyond emotions:
+        gaze direction, glasses, hairstyle, clothing, hand gestures, winking,
+        deception indicators.
+
+        Args:
+            frame_base64: Base64-encoded image frame
+
+        Returns:
+            Dict with visual observations or None if unavailable
+        """
+        self._initialize()
+
+        if not self._model:
+            return None
+
+        try:
+            # Decode base64 to bytes for Gemini vision
+            image_bytes = base64.b64decode(frame_base64)
+
+            # Create image part for Gemini
+            image_part = {
+                "mime_type": "image/jpeg",
+                "data": image_bytes,
+            }
+
+            prompt = (
+                "Analyze this person's face and body. Return ONLY valid JSON with these fields:\n"
+                "{\n"
+                '  "gaze_direction": "looking at camera" or "looking left" or "looking right" '
+                'or "looking up" or "looking down" or "eyes closed",\n'
+                '  "glasses": true or false,\n'
+                '  "hairstyle": "brief description like short brown hair",\n'
+                '  "clothing": "brief description like blue t-shirt",\n'
+                '  "hand_gesture": "none" or "waving" or "pointing" or "thumbs up" '
+                'or "peace sign" or "hand on face" or other gesture,\n'
+                '  "winking": true or false,\n'
+                '  "facial_expression_note": "any unusual observation or empty string",\n'
+                '  "deception_indicators": "none" or brief description of inconsistencies\n'
+                "}\n"
+                "Be concise. Only return JSON, no other text."
+            )
+
+            response = self._model.generate_content(
+                [prompt, image_part],
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.3,
+                    max_output_tokens=300,
+                    response_mime_type="application/json",
+                ),
+            )
+
+            result = json.loads(response.text)
+
+            # Validate expected fields
+            expected_fields = [
+                "gaze_direction", "glasses", "hand_gesture", "winking",
+            ]
+            for field in expected_fields:
+                if field not in result:
+                    result[field] = "none" if field != "glasses" and field != "winking" else False
+
+            return result
+
+        except Exception as e:
+            print(f"Gemini vision analysis error: {e}")
+            return None
 
     def cleanup_session(self, session_id: str):
         """Remove session data from memory."""

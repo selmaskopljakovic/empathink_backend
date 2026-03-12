@@ -166,7 +166,7 @@ class FaceEmotionAnalyzer:
             # XAI objašnjenje (koristi FER labele jer FACS mapiranje koristi originalne)
             xai_explanation = None
             if include_xai:
-                xai_explanation = self._generate_explanation(emotions_percent, primary_emotion_fer)
+                xai_explanation = self.generate_explanation(emotions_percent, primary_emotion_fer)
 
             # Masking detection
             masking_result = None
@@ -283,12 +283,16 @@ class FaceEmotionAnalyzer:
             except Exception as e:
                 print(f"Masking detection error (fast): {e}")
 
+            # Generate XAI explanation
+            xai_explanation = self.generate_explanation(emotions_raw, primary_fer)
+
             response = {
                 "face_detected": True,
                 "emotions": emotions,
                 "primary_emotion": primary,
                 "confidence": emotions[primary],
                 "face_box": face_box,
+                "xai_explanation": xai_explanation,
                 "timestamp": time.time()
             }
 
@@ -356,7 +360,7 @@ class FaceEmotionAnalyzer:
                 self._fer_detector = FER(mtcnn=True)
             return self._fer_detector.detect_emotions(img_rgb)
 
-    def _generate_explanation(self, emotions: Dict[str, float], primary_emotion: str) -> Dict:
+    def generate_explanation(self, emotions: Dict[str, float], primary_emotion: str) -> Dict:
         """Generiše XAI objašnjenje za face analizu"""
 
         # Facial Action Units (FACS) za svaku emociju
