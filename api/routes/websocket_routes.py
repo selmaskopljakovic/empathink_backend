@@ -363,9 +363,12 @@ async def websocket_camera_conversation(websocket: WebSocket):
                         **result,
                     })
 
-                    # Proactive AI comment every 5th frame (~10s at 2s intervals)
+                    # Stagger Gemini calls to avoid rate limiting:
+                    # - Proactive AI comment at frame 7, 17, 27...
+                    # - Vision analysis at frame 3, 13, 23...
                     frame_count += 1
-                    if frame_count % 5 == 0 and latest_emotions:
+
+                    if frame_count % 10 == 7 and latest_emotions:
                         try:
                             ai_response = await asyncio.to_thread(
                                 conversation_engine.generate_response,
@@ -382,9 +385,10 @@ async def websocket_camera_conversation(websocket: WebSocket):
                         except Exception as e:
                             print(f"Proactive AI comment error: {e}")
 
-                    # Gemini vision analysis every 5th frame for visual observations
-                    if frame_count % 5 == 0 and latest_frame_b64:
+                    # Gemini vision analysis every 10th frame (~20s) - staggered
+                    if frame_count % 10 == 3 and latest_frame_b64:
                         try:
+                            print(f"[WS] Triggering vision analysis (frame {frame_count})")
                             observations = await asyncio.to_thread(
                                 conversation_engine.analyze_visual_details,
                                 latest_frame_b64,
@@ -396,6 +400,9 @@ async def websocket_camera_conversation(websocket: WebSocket):
                                     "observations": observations,
                                     "timestamp": time.time(),
                                 })
+                                print(f"[WS] Vision sent: {list(observations.keys())}")
+                            else:
+                                print("[WS] Vision returned None")
                         except Exception as e:
                             print(f"Gemini vision analysis error: {e}")
 

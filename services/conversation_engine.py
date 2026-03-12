@@ -369,69 +369,95 @@ class ConversationEngine:
     def analyze_visual_details(self, frame_base64: str) -> Optional[Dict]:
         """
         Use Gemini Vision API to analyze visual details beyond emotions:
-        gaze direction, glasses, hairstyle, clothing, hand gestures, winking,
-        deception indicators.
-
-        Args:
-            frame_base64: Base64-encoded image frame
-
-        Returns:
-            Dict with visual observations or None if unavailable
+        gaze, glasses, hairstyle, clothing, hand gestures, winking, age,
+        race, eyebrow raising, grimaces, focus level, finger count, lie detection.
         """
         self._initialize()
 
         if not self._model:
+            print("[Vision] No Gemini model available")
             return None
 
         try:
-            # Strip data URL prefix if present (e.g., "data:image/jpeg;base64,...")
+            # Strip data URL prefix if present
             if "," in frame_base64 and frame_base64.startswith("data:"):
                 frame_base64 = frame_base64.split(",", 1)[1]
 
-            # Decode base64 to PIL Image for Gemini vision
             image_bytes = base64.b64decode(frame_base64)
-            image = Image.open(io.BytesIO(image_bytes))
 
-            prompt = (
-                "Analyze this person's face and body. Return ONLY valid JSON with these fields:\n"
-                "{\n"
-                '  "gaze_direction": "looking at camera" or "looking left" or "looking right" '
-                'or "looking up" or "looking down" or "eyes closed",\n'
-                '  "glasses": true or false,\n'
-                '  "hairstyle": "brief description like short brown hair",\n'
-                '  "clothing": "brief description like blue t-shirt",\n'
-                '  "hand_gesture": "none" or "waving" or "pointing" or "thumbs up" '
-                'or "peace sign" or "hand on face" or other gesture,\n'
-                '  "winking": true or false,\n'
-                '  "facial_expression_note": "any unusual observation or empty string",\n'
-                '  "deception_indicators": "none" or brief description of inconsistencies\n'
-                "}\n"
-                "Be concise. Only return JSON, no other text."
-            )
+            # Try PIL Image first, fallback to inline_data Part
+            image_content = None
+            try:
+                image_content = Image.open(io.BytesIO(image_bytes))
+                print(f"[Vision] PIL Image loaded: {image_content.size}")
+            except Exception as pil_err:
+                print(f"[Vision] PIL failed ({pil_err}), using inline_data")
+                image_content = {
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": frame_base64,
+                    }
+                }
 
+            prompt = """Analyze this person carefully. Return ONLY valid JSON with ALL these fields:
+{
+  "gaze_direction": "looking at camera" or "looking left" or "looking right" or "looking up" or "looking down" or "eyes closed",
+  "focus_level": "focused" or "distracted" or "drowsy" or "alert",
+  "glasses": true or false,
+  "hairstyle": "brief description e.g. long brown wavy hair",
+  "clothing": "brief description e.g. blue hoodie",
+  "hand_gesture": "none" or "waving" or "pointing" or "thumbs up" or "peace sign" or "hand on face" or "raised hand" or other,
+  "finger_count": number of visible raised fingers (0 if hands not visible),
+  "winking": true or false,
+  "eyebrow_raised": "none" or "left" or "right" or "both",
+  "facial_grimace": "none" or description of grimace like "tongue out" or "scrunched nose" or "puffed cheeks",
+  "estimated_age_range": "e.g. 20-25",
+  "ethnicity": "brief description",
+  "deception_indicators": "none" or brief description of micro-expressions inconsistent with stated emotion,
+  "facial_expression_note": "any notable observation or empty string"
+}
+Be precise. Respond ONLY with JSON."""
+
+            print("[Vision] Sending to Gemini...")
             response = self._model.generate_content(
-                [prompt, image],
+                [prompt, image_content],
                 generation_config=genai.types.GenerationConfig(
-                    temperature=0.3,
-                    max_output_tokens=300,
+                    temperature=0.2,
+                    max_output_tokens=500,
                     response_mime_type="application/json",
                 ),
             )
 
             result = json.loads(response.text)
+            print(f"[Vision] Success: {list(result.keys())}")
 
-            # Validate expected fields
-            expected_fields = [
-                "gaze_direction", "glasses", "hand_gesture", "winking",
-            ]
-            for field in expected_fields:
+            # Ensure required fields have defaults
+            defaults = {
+                "gaze_direction": "unknown",
+                "focus_level": "unknown",
+                "glasses": False,
+                "hairstyle": "",
+                "clothing": "",
+                "hand_gesture": "none",
+                "finger_count": 0,
+                "winking": False,
+                "eyebrow_raised": "none",
+                "facial_grimace": "none",
+                "estimated_age_range": "",
+                "ethnicity": "",
+                "deception_indicators": "none",
+                "facial_expression_note": "",
+            }
+            for field, default in defaults.items():
                 if field not in result:
-                    result[field] = "none" if field != "glasses" and field != "winking" else False
+                    result[field] = default
 
             return result
 
         except Exception as e:
-            print(f"Gemini vision analysis error: {e}")
+            print(f"[Vision] ERROR: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def cleanup_session(self, session_id: str):
