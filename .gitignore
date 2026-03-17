@@ -1,4 +1,42 @@
-.env
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Logs
+*.log
+
+# Model cache
+models/
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
 nul

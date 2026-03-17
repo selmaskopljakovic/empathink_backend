@@ -43,14 +43,14 @@ gcloud builds submit --config cloudbuild.yaml
 #### 3. Dobijete URL
 Nakon deploy-a dobijete URL poput:
 ```
-https://empathink-backend-XXXXX-ew.a.run.app
+https://empathink-backend-<your-cloud-run-hash>-ew.a.run.app
 ```
 
 #### 4. Ažuriraj Flutter app
 U `lib/services/emotion_api_service.dart` promijeni:
 ```dart
-static const String _baseUrl = 'https://empathink-backend-XXXXX-ew.a.run.app';
-static const String _wsUrl = 'wss://empathink-backend-XXXXX-ew.a.run.app';
+static const String _baseUrl = 'https://empathink-backend-<your-cloud-run-hash>-ew.a.run.app';
+static const String _wsUrl = 'wss://empathink-backend-<your-cloud-run-hash>-ew.a.run.app';
 ```
 
 ---

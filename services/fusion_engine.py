@@ -119,6 +119,9 @@ class MultimodalFusionEngine:
         # Detect incongruence between modalities
         incongruence = self._detect_incongruence(vectors, modalities)
 
+        # Calibrate fused confidence based on incongruence signals
+        fused_confidence = self._calibrate_fused_confidence(fused_confidence, incongruence)
+
         # Individual results for display
         individual_results = {name: result["emotions"] for name, result in modalities.items()}
 
@@ -302,6 +305,48 @@ class MultimodalFusionEngine:
                 )
 
         return explanation
+
+    def _calibrate_fused_confidence(self, raw_confidence: float, incongruence_result: Dict) -> float:
+        """
+        Adjust fused confidence based on cross-modal agreement/disagreement.
+
+        Rules:
+        - Multi-modal agreement boost: all pairwise similarities > 0.80 -> +8%
+        - Incongruence penalty: any pairwise similarity < 0.50 -> -15%,
+          else any between 0.50-0.70 -> -8%
+        - Masking warning penalty: possible_masking is True -> additional -10%
+
+        Result is clamped to [5.0, 99.0].
+        """
+        calibrated = raw_confidence
+
+        if incongruence_result is None:
+            return calibrated
+
+        pairwise = incongruence_result.get("pairwise_similarities", {})
+
+        if pairwise:
+            similarities = list(pairwise.values())
+            min_sim = min(similarities)
+
+            # Multi-modal agreement boost
+            if all(s > 0.80 for s in similarities):
+                calibrated += 8.0
+
+            # Incongruence penalty (mutually exclusive with agreement boost)
+            elif min_sim < 0.50:
+                calibrated -= 15.0
+            elif min_sim < 0.70:
+                calibrated -= 8.0
+
+        # Masking warning penalty (additive, stacks with incongruence penalty)
+        if incongruence_result.get("possible_masking", False):
+            calibrated -= 10.0
+
+        # Clamp to valid range
+        calibrated = max(5.0, min(99.0, calibrated))
+
+        return round(calibrated, 1)
 
     def _empty_result(self, reason: str) -> Dict:
         """Return empty result when no modalities available."""

@@ -2,19 +2,29 @@
 Voice Analysis API Routes
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from typing import Optional
 from services.voice_analyzer import voice_analyzer
+from dependencies import limiter
+from api.auth import get_current_user
+from api.file_validation import validate_audio_bytes
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
 @router.post("/voice")
+@limiter.limit("10/minute")
 async def analyze_voice(
+    request: Request,
     audio: UploadFile = File(...),
     include_xai: bool = Form(True),
     user_id: Optional[str] = Form(None),
-    session_id: Optional[str] = Form(None)
+    session_id: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user),
 ):
     """
     Analizira audio snimak i vraća emocije sa procentima.
@@ -44,6 +54,10 @@ async def analyze_voice(
         if len(audio_data) > 10 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Audio file too large (max 10MB)")
 
+        # Magic byte validation
+        if not validate_audio_bytes(audio_data):
+            raise HTTPException(status_code=400, detail="Invalid audio file content")
+
         # Analiziraj
         result = voice_analyzer.analyze(
             audio_data=audio_data,
@@ -55,11 +69,13 @@ async def analyze_voice(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Voice analysis failed: {str(e)}")
+        logger.error("Voice analysis failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal analysis error")
 
 
 @router.get("/voice/models")
-async def get_voice_models():
+@limiter.limit("60/minute")
+async def get_voice_models(request: Request, current_user: dict = Depends(get_current_user)):
     """
     Vraća informacije o modelima za voice analizu.
     """

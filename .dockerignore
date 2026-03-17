@@ -11,6 +11,8 @@ __pycache__
 env/
 venv/
 .env
+.env.*
+!.env.example
 
 # IDE
 .idea/
@@ -22,8 +24,21 @@ venv/
 .pytest_cache/
 .coverage
 htmlcov/
+tests/
+
+# Documentation
+README.md
+DEPLOYMENT.md
+*.md
 
 # Misc
 *.log
 *.tmp
-README.md
+*.bak
+.DS_Store
+Thumbs.db
+
+# Service account keys (NEVER include)
+*service-account*.json
+*credentials*.json
+firebase-*.json

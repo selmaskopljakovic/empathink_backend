@@ -2,19 +2,29 @@
 Image Analysis API Routes
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from typing import Optional
 from services.face_analyzer import face_analyzer
+from dependencies import limiter
+from api.auth import get_current_user
+from api.file_validation import validate_image_bytes
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
 @router.post("/image")
+@limiter.limit("10/minute")
 async def analyze_image(
+    request: Request,
     image: UploadFile = File(...),
     include_xai: bool = Form(True),
     user_id: Optional[str] = Form(None),
-    session_id: Optional[str] = Form(None)
+    session_id: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user),
 ):
     """
     Analizira sliku lica i vraća emocije sa procentima.
@@ -47,6 +57,10 @@ async def analyze_image(
         if len(image_data) > 5 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Image file too large (max 5MB)")
 
+        # Magic byte validation
+        if not validate_image_bytes(image_data):
+            raise HTTPException(status_code=400, detail="Invalid image file content")
+
         # Analiziraj
         result = face_analyzer.analyze_image(
             image_data=image_data,
@@ -58,11 +72,13 @@ async def analyze_image(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Image analysis failed: {str(e)}")
+        logger.error("Image analysis failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal analysis error")
 
 
 @router.get("/image/models")
-async def get_image_models():
+@limiter.limit("60/minute")
+async def get_image_models(request: Request, current_user: dict = Depends(get_current_user)):
     """
     Vraća informacije o modelima za image analizu.
     """

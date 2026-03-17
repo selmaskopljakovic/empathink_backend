@@ -7,8 +7,11 @@ Detects fake smiles and masked emotions using 3 layers:
 """
 
 import time
+import logging
 import numpy as np
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class MaskingDetector:
@@ -54,10 +57,10 @@ class MaskingDetector:
             )
             self._mp_initialized = True
         except ImportError:
-            print("MediaPipe not available - landmark analysis disabled")
+            logger.warning("MediaPipe not available - landmark analysis disabled")
             self._mp_initialized = True  # Don't retry
         except Exception as e:
-            print(f"MediaPipe initialization error: {e}")
+            logger.error("MediaPipe initialization error: %s", e)
             self._mp_initialized = True
 
     def analyze_frame(
@@ -95,6 +98,12 @@ class MaskingDetector:
             landmark_result = self._analyze_landmarks(image_rgb)
             if landmark_result:
                 signals.append(landmark_result)
+
+        # Layer 3b: Single-image asymmetry analysis
+        if image_rgb is not None:
+            asymmetry_result = self._analyze_asymmetry(image_rgb, emotions)
+            if asymmetry_result:
+                signals.append(asymmetry_result)
 
         # Combine signals
         if signals:
@@ -269,80 +278,136 @@ class MaskingDetector:
             return None
 
         except Exception as e:
-            print(f"Landmark analysis error: {e}")
+            logger.warning("Landmark analysis error: %s", e)
             return None
 
-    def _calculate_au6(self, landmarks, h: int, w: int) -> float:
+    def _calculate_au6_sides(self, landmarks, h: int, w: int) -> Tuple[float, float]:
         """
-        Approximate AU6 (Cheek Raiser) using MediaPipe landmarks.
-        Measures the elevation of the cheek area relative to the lower eyelid.
-        Higher value = more cheek engagement (genuine smile).
-
-        Key landmarks:
-        - Lower eyelid: 111 (left), 340 (right)
-        - Cheek: 117 (left), 346 (right)
-        - Eye outer corner: 33 (left), 263 (right)
+        Approximate AU6 (Cheek Raiser) per side using MediaPipe landmarks.
+        Returns (left_au6, right_au6).
         """
-        # Left eye lower lid to cheek distance
         left_lower_lid = landmarks[111]
         left_cheek = landmarks[117]
-        left_eye_corner = landmarks[33]
 
-        # Right eye
         right_lower_lid = landmarks[340]
         right_cheek = landmarks[346]
-        right_eye_corner = landmarks[263]
 
-        # Normalize by inter-eye distance
         inter_eye_dist = self._landmark_distance(
             landmarks[33], landmarks[263], h, w
         )
         if inter_eye_dist < 1:
-            return 0.0
+            return (0.0, 0.0)
 
-        # Cheek rise: how much the cheek pushes up toward the eye
         left_cheek_rise = (left_cheek.y - left_lower_lid.y) * h / inter_eye_dist
         right_cheek_rise = (right_cheek.y - right_lower_lid.y) * h / inter_eye_dist
 
-        # Lower values mean cheek is closer to eye (more AU6 activation)
-        # Invert and normalize to 0-1 range
         au6_left = max(0, 1.0 - left_cheek_rise * 2.5)
         au6_right = max(0, 1.0 - right_cheek_rise * 2.5)
 
-        return (au6_left + au6_right) / 2.0
+        return (au6_left, au6_right)
 
-    def _calculate_au12(self, landmarks, h: int, w: int) -> float:
+    def _calculate_au6(self, landmarks, h: int, w: int) -> float:
         """
-        Approximate AU12 (Lip Corner Puller) using MediaPipe landmarks.
-        Measures how much the lip corners are pulled up relative to lip center.
+        Approximate AU6 (Cheek Raiser) — average of both sides.
+        """
+        left, right = self._calculate_au6_sides(landmarks, h, w)
+        return (left + right) / 2.0
 
-        Key landmarks:
-        - Left mouth corner: 61
-        - Right mouth corner: 291
-        - Upper lip center: 13
-        - Lower lip center: 14
-        - Nose tip: 1 (reference point)
+    def _calculate_au12_sides(self, landmarks, h: int, w: int) -> Tuple[float, float]:
+        """
+        Approximate AU12 (Lip Corner Puller) per side using MediaPipe landmarks.
+        Returns (left_au12, right_au12).
         """
         left_corner = landmarks[61]
         right_corner = landmarks[291]
         upper_lip = landmarks[13]
         nose_tip = landmarks[1]
 
-        # Normalize by nose-to-lip distance
         nose_lip_dist = abs(nose_tip.y - upper_lip.y) * h
         if nose_lip_dist < 1:
-            return 0.0
+            return (0.0, 0.0)
 
-        # Lip corners relative to lip center
         lip_center_y = upper_lip.y
         left_elevation = (lip_center_y - left_corner.y) * h / nose_lip_dist
         right_elevation = (lip_center_y - right_corner.y) * h / nose_lip_dist
 
-        # Positive = corners above center (smile)
-        au12 = (left_elevation + right_elevation) / 2.0
+        au12_left = max(0, min(left_elevation * 1.5, 1.0))
+        au12_right = max(0, min(right_elevation * 1.5, 1.0))
 
-        # Normalize to 0-1
-        return max(0, min(au12 * 1.5, 1.0))
+        return (au12_left, au12_right)
+
+    def _calculate_au12(self, landmarks, h: int, w: int) -> float:
+        """
+        Approximate AU12 (Lip Corner Puller) — average of both sides.
+        """
+        left, right = self._calculate_au12_sides(landmarks, h, w)
+        return (left + right) / 2.0
+
+    def _analyze_asymmetry(self, image_rgb: np.ndarray, emotions: Dict[str, float]) -> Optional[Dict]:
+        """
+        Layer 3b: Single-image asymmetry analysis.
+        Detects facial asymmetry and eye-mouth incongruence without temporal data.
+
+        - Facial asymmetry: large difference between left/right AU6 + AU12
+        - Eye-mouth incongruence: mouth smiling but eyes not engaged
+        """
+        self._initialize_mediapipe()
+
+        if self._mp_face_mesh is None:
+            return None
+
+        try:
+            results = self._mp_face_mesh.process(image_rgb)
+            if not results.multi_face_landmarks:
+                return None
+
+            landmarks = results.multi_face_landmarks[0].landmark
+            h, w = image_rgb.shape[:2]
+
+            au6_left, au6_right = self._calculate_au6_sides(landmarks, h, w)
+            au12_left, au12_right = self._calculate_au12_sides(landmarks, h, w)
+            au6_avg = (au6_left + au6_right) / 2.0
+            au12_avg = (au12_left + au12_right) / 2.0
+
+            # Check facial asymmetry
+            asymmetry_score = (abs(au6_left - au6_right) + abs(au12_left - au12_right)) / 2.0
+            if asymmetry_score > 0.15:
+                confidence = min(asymmetry_score * 2.0, 0.85)
+                return {
+                    "layer": "asymmetry",
+                    "type": "facial_asymmetry",
+                    "surface_emotion": max(emotions, key=emotions.get) if emotions else "unknown",
+                    "underlying_emotion": "unknown",
+                    "confidence": round(confidence, 2),
+                    "detail": f"Facial asymmetry detected: score={asymmetry_score:.2f} "
+                              f"(AU6 L={au6_left:.2f}/R={au6_right:.2f}, "
+                              f"AU12 L={au12_left:.2f}/R={au12_right:.2f})",
+                    "au6_score": round(au6_avg, 3),
+                    "au12_score": round(au12_avg, 3),
+                }
+
+            # Check eye-mouth incongruence
+            if au12_avg > 0.3 and au6_avg < 0.25:
+                gap = au12_avg - au6_avg
+                confidence = min(0.3 + gap * 1.5, 0.85)
+                return {
+                    "layer": "eye_mouth_incongruence",
+                    "type": "eye_mouth_incongruence",
+                    "surface_emotion": "joy",
+                    "underlying_emotion": "unknown",
+                    "confidence": round(confidence, 2),
+                    "detail": f"Eye-mouth incongruence: mouth smiling (AU12={au12_avg:.2f}) "
+                              f"but eyes not engaged (AU6={au6_avg:.2f})",
+                    "au6_score": round(au6_avg, 3),
+                    "au12_score": round(au12_avg, 3),
+                    "is_duchenne": False,
+                }
+
+            return None
+
+        except Exception as e:
+            logger.warning("Asymmetry analysis error: %s", e)
+            return None
 
     def _landmark_distance(self, lm1, lm2, h: int, w: int) -> float:
         """Euclidean distance between two landmarks in pixel space"""
@@ -457,6 +522,14 @@ class MaskingDetector:
                 "Emocionalna nestabilnost detektovana. Ceste promjene dominantne "
                 "emocije mogu ukazivati na unutrasnji konflikt."
             ),
+            "facial_asymmetry": (
+                "Asimetrija lica detektovana. Lijeva i desna strana lica pokazuju "
+                "razlicite nivoe aktivacije misica, sto moze ukazivati na neiskren izraz."
+            ),
+            "eye_mouth_incongruence": (
+                "Nepodudarnost ociju i usta detektovana. Usta pokazuju osmijeh ali "
+                "oci nisu angazovane, sto je karakteristika neiskrenog osmijeha."
+            ),
         }
 
         # Handle sudden_ prefixed types
@@ -477,6 +550,10 @@ class MaskingDetector:
             methods.append("temporalna analiza")
         if "landmarks" in layers_used:
             methods.append("analiza facijalnih landmarka (AU6/AU12)")
+        if "asymmetry" in layers_used:
+            methods.append("analiza asimetrije lica (lijeva/desna strana)")
+        if "eye_mouth_incongruence" in layers_used:
+            methods.append("analiza podudarnosti ociju i usta")
 
         return {
             "method": "masking_detection",

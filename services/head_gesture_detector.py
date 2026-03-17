@@ -7,8 +7,11 @@ Applies detrending and zero-crossing analysis for robust detection.
 """
 
 import base64
+import logging
 import numpy as np
 from typing import Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class HeadGestureDetector:
@@ -41,10 +44,10 @@ class HeadGestureDetector:
             )
             self._mp_initialized = True
         except ImportError:
-            print("MediaPipe not available - gesture detection disabled")
+            logger.warning("MediaPipe not available - gesture detection disabled")
             self._mp_initialized = True
         except Exception as e:
-            print(f"MediaPipe initialization error: {e}")
+            logger.error("MediaPipe initialization error: %s", e)
             self._mp_initialized = True
 
     def _decode_frame(self, frame_base64: str) -> Optional[np.ndarray]:

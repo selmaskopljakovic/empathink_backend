@@ -2,10 +2,16 @@
 Text Analysis API Routes
 """
 
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from services.text_analyzer import text_analyzer
+from dependencies import limiter
+from api.auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -24,7 +30,8 @@ class QuickAnalysisRequest(BaseModel):
 
 
 @router.post("/text")
-async def analyze_text(request: TextAnalysisRequest):
+@limiter.limit("20/minute")
+async def analyze_text(request: Request, body: TextAnalysisRequest, user: dict = Depends(get_current_user)):
     """
     Analizira tekst i vraća emocije sa procentima.
 
@@ -34,30 +41,32 @@ async def analyze_text(request: TextAnalysisRequest):
     Returns:
         EmotionResult sa svim emocijama, sentimentom i XAI objašnjenjima
     """
-    if not request.text or not request.text.strip():
+    if not body.text or not body.text.strip():
         raise HTTPException(status_code=400, detail="Text is required")
 
-    if len(request.text) > 5000:
+    if len(body.text) > 5000:
         raise HTTPException(status_code=400, detail="Text too long (max 5000 characters)")
 
     try:
         result = text_analyzer.analyze(
-            text=request.text,
-            include_xai=request.include_xai
+            text=body.text,
+            include_xai=body.include_xai
         )
         return result
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        logger.error("Text analysis failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal analysis error")
 
 
 @router.post("/text/quick")
-async def quick_analyze_text(request: QuickAnalysisRequest):
+@limiter.limit("60/minute")
+async def quick_analyze_text(request: Request, body: QuickAnalysisRequest, user: dict = Depends(get_current_user)):
     """
     Brza analiza teksta bez XAI objašnjenja.
     Koristi se za real-time typing feedback.
     """
-    if not request.text or len(request.text) < 3:
+    if not body.text or len(body.text) < 3:
         return {
             "success": True,
             "emotions": {"neutral": 100.0},
@@ -65,9 +74,12 @@ async def quick_analyze_text(request: QuickAnalysisRequest):
             "confidence": 0.0
         }
 
+    if len(body.text) > 5000:
+        raise HTTPException(status_code=400, detail="Text too long (max 5000 characters)")
+
     try:
         result = text_analyzer.analyze(
-            text=request.text,
+            text=body.text,
             include_xai=False
         )
         # Vraća samo osnovne podatke za brzinu
@@ -79,16 +91,13 @@ async def quick_analyze_text(request: QuickAnalysisRequest):
         }
 
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "emotions": {"neutral": 100.0},
-            "primary_emotion": "neutral"
-        }
+        logger.error(f"Quick text analysis failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal analysis error")
 
 
 @router.get("/text/models")
-async def get_available_models():
+@limiter.limit("60/minute")
+async def get_available_models(request: Request, current_user: dict = Depends(get_current_user)):
     """
     Vraća informacije o dostupnim modelima za text analizu.
     Korisno za dokumentaciju i debugging.
