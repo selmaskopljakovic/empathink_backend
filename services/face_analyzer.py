@@ -17,27 +17,57 @@ from services.masking_detector import masking_detector
 
 logger = logging.getLogger(__name__)
 
-# Lazy-loaded HSEmotion model
+# Lazy-loaded HSEmotion model (loaded directly via timm, no hsemotion pip package needed)
 _hsemotion_model = None
+_hsemotion_transform = None
+
+# HSEmotion model URL (enet_b2_8 trained on AffectNet-8, state-of-the-art)
+_HSEMOTION_URL = "https://github.com/sb-ai-lab/EmotiEffLib/raw/main/models/affectnet_emotions/enet_b2_8.pt"
 
 
 def get_hsemotion_model():
-    """Lazy load HSEmotion (EfficientNet-B0 trained on AffectNet)."""
-    global _hsemotion_model
+    """Lazy load HSEmotion EfficientNet-B2 (AffectNet-8, ~66% accuracy)."""
+    global _hsemotion_model, _hsemotion_transform
     if _hsemotion_model is not None:
-        return _hsemotion_model
+        return _hsemotion_model, _hsemotion_transform
 
     try:
-        from hsemotion.facial_emotions import HSEmotionRecognizer
-        _hsemotion_model = HSEmotionRecognizer(
-            model_name='enet_b2_8',
-            device='cpu'
-        )
-        logger.info("HSEmotion model loaded (enet_b2_8, AffectNet, ~66.3% accuracy)")
-        return _hsemotion_model
+        import torch
+        import timm
+        from torchvision import transforms
+        import urllib.request
+        import tempfile
+
+        # Create model architecture
+        model = timm.create_model('tf_efficientnet_b2', pretrained=False, num_classes=8)
+
+        # Download weights
+        weights_path = os.path.join(tempfile.gettempdir(), 'enet_b2_8.pt')
+        if not os.path.exists(weights_path):
+            logger.info("Downloading HSEmotion weights...")
+            urllib.request.urlretrieve(_HSEMOTION_URL, weights_path)
+
+        # Load weights
+        state_dict = torch.load(weights_path, map_location='cpu', weights_only=True)
+        model.load_state_dict(state_dict)
+        model.eval()
+
+        # Transform for input images (224x224, ImageNet normalization)
+        transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+
+        _hsemotion_model = model
+        _hsemotion_transform = transform
+        logger.info("HSEmotion model loaded (enet_b2_8, AffectNet-8, ~66%% accuracy)")
+        return _hsemotion_model, _hsemotion_transform
+
     except Exception as e:
         logger.error("Failed to load HSEmotion: %s", e)
-        return None
+        return None, None
 
 
 class FaceEmotionAnalyzer:
@@ -92,8 +122,9 @@ class FaceEmotionAnalyzer:
         if self._is_initialized:
             return
 
-        self._hsemotion = get_hsemotion_model()
-        if self._hsemotion is not None:
+        model, transform = get_hsemotion_model()
+        if model is not None:
+            self._hsemotion = (model, transform)
             self._backend = "hsemotion"
             self._is_initialized = True
             return
@@ -363,40 +394,58 @@ class FaceEmotionAnalyzer:
 
     def _analyze_with_hsemotion(self, img_rgb: np.ndarray) -> List[Dict]:
         """
-        Analyze face using HSEmotion (AffectNet, state-of-the-art).
+        Analyze face using HSEmotion EfficientNet-B2 (AffectNet, state-of-the-art).
+        Uses OpenCV Haar cascade for face detection + direct model inference.
         Returns result in same format as FER for compatibility.
         """
         try:
             import cv2
+            import torch
 
-            # HSEmotion expects BGR image and uses its own face detector
-            img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+            model, transform = self._hsemotion
 
-            # Detect faces and predict emotions
-            emotions_list, scores_list = self._hsemotion.predict_emotions(
-                img_bgr, logits=False
+            # Detect face using OpenCV Haar cascade
+            img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+            face_cascade = cv2.CascadeClassifier(
+                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
             )
+            faces = face_cascade.detectMultiScale(img_gray, 1.1, 5, minSize=(48, 48))
 
-            if not emotions_list or len(emotions_list) == 0:
-                return []
+            if len(faces) == 0:
+                # Try with full image as face (single person assumption)
+                faces = [(0, 0, img_rgb.shape[1], img_rgb.shape[0])]
 
             converted = []
-            for i, (emotion_label, scores) in enumerate(zip(emotions_list, scores_list)):
-                # Build emotions dict from scores array
+            for (x, y, w, h) in faces:
+                # Crop face region with margin
+                margin = int(max(w, h) * 0.1)
+                x1 = max(0, x - margin)
+                y1 = max(0, y - margin)
+                x2 = min(img_rgb.shape[1], x + w + margin)
+                y2 = min(img_rgb.shape[0], y + h + margin)
+                face_crop = img_rgb[y1:y2, x1:x2]
+
+                if face_crop.size == 0:
+                    continue
+
+                # Transform and predict
+                input_tensor = transform(face_crop).unsqueeze(0)
+                with torch.no_grad():
+                    logits = model(input_tensor)
+                    probs = torch.softmax(logits, dim=1)[0]
+
+                # Build emotions dict (0-1 scale for FER compat)
                 emotions_dict = {}
                 for j, label in enumerate(self.HSEMOTION_LABELS):
-                    if j < len(scores):
-                        emotions_dict[label] = float(scores[j])
+                    emotions_dict[label] = float(probs[j].item())
 
-                # HSEmotion doesn't return face boxes directly,
-                # use a placeholder (full image)
-                h, w = img_rgb.shape[:2]
-                box = (0, 0, w, h)
-
+                box = (int(x), int(y), int(w), int(h))
                 converted.append({
                     "emotions": emotions_dict,
                     "box": box,
                 })
+
+                break  # Take first face only
 
             return converted
 

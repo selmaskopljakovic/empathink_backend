@@ -27,14 +27,22 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Pre-download HuggingFace models during build (so container is self-contained)
+# Pre-download models during build (so container is self-contained)
 RUN python -c "\
 from transformers import pipeline, Wav2Vec2ForSequenceClassification, Wav2Vec2FeatureExtractor; \
 pipeline('text-classification', model='SamLowe/roberta-base-go_emotions', top_k=None, device=-1); \
 pipeline('sentiment-analysis', model='cardiffnlp/twitter-roberta-base-sentiment-latest', device=-1); \
 Wav2Vec2FeatureExtractor.from_pretrained('superb/wav2vec2-large-superb-er'); \
 Wav2Vec2ForSequenceClassification.from_pretrained('superb/wav2vec2-large-superb-er'); \
-print('All models downloaded successfully')"
+print('HuggingFace models downloaded')"
+
+# Pre-download HSEmotion weights
+RUN python -c "\
+import urllib.request, os; \
+url='https://github.com/sb-ai-lab/EmotiEffLib/raw/main/models/affectnet_emotions/enet_b2_8.pt'; \
+os.makedirs('/tmp', exist_ok=True); \
+urllib.request.urlretrieve(url, '/tmp/enet_b2_8.pt'); \
+print('HSEmotion weights downloaded')"
 
 # Switch to non-root user
 USER appuser
