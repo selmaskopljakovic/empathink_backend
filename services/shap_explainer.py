@@ -4,7 +4,6 @@ Provides word-level SHAP explanations for text emotion classification.
 Uses the same DistilRoBERTa model as the main text analyzer.
 """
 
-import hashlib
 import logging
 from typing import Dict, List, Optional, Tuple
 from collections import OrderedDict
@@ -58,7 +57,7 @@ def _get_shap_components():
         return _shap_explainer, _tokenizer, _model
 
     except Exception as e:
-        logger.error("Failed to initialize SHAP explainer: %s", e)
+        logger.error(f"Failed to initialize SHAP explainer: {e}")
         raise
 
 
@@ -71,8 +70,8 @@ def _truncate_text(text: str, max_words: int = _SHAP_MAX_WORDS) -> str:
 
 
 def _get_cache_key(text: str) -> str:
-    """Generate a cache key from the text (hashed for privacy)."""
-    return hashlib.sha256(text.strip().lower().encode()).hexdigest()
+    """Generate a cache key from the text."""
+    return text.strip().lower()
 
 
 class ShapTextExplainer:
@@ -158,7 +157,7 @@ class ShapTextExplainer:
             return result
 
         except Exception as e:
-            logger.error("SHAP explanation failed: %s", e)
+            logger.error(f"SHAP explanation failed: {e}")
             return None
 
     def _get_emotion_index(self, emotion: str) -> int:

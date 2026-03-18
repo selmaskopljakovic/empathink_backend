@@ -1,12 +1,11 @@
 """
 Face Emotion Analyzer Service
-Primary: HSEmotion (AffectNet, state-of-the-art, 1st place ABAW 2025)
-Fallback: FER (FER2013, lighter)
+Uses FER/DeepFace for facial expression recognition with MTCNN face detection.
+Supports backend switching between FER (FER2013) and DeepFace (AffectNet).
 """
 
 import time
 import os
-import logging
 import numpy as np
 from typing import Dict, Optional, List
 from datetime import datetime
@@ -15,122 +14,64 @@ import base64
 
 from services.masking_detector import masking_detector
 
-logger = logging.getLogger(__name__)
-
-# Lazy-loaded HSEmotion model (loaded directly via timm, no hsemotion pip package needed)
-_hsemotion_model = None
-_hsemotion_transform = None
-
-# HSEmotion model URL (enet_b2_8 trained on AffectNet-8, state-of-the-art)
-_HSEMOTION_URL = "https://github.com/sb-ai-lab/EmotiEffLib/raw/main/models/affectnet_emotions/enet_b2_8.pt"
-
-
-def get_hsemotion_model():
-    """Lazy load HSEmotion EfficientNet-B2 (AffectNet-8, ~66% accuracy)."""
-    global _hsemotion_model, _hsemotion_transform
-    if _hsemotion_model is not None:
-        return _hsemotion_model, _hsemotion_transform
-
-    try:
-        import torch
-        import timm
-        from torchvision import transforms
-        import urllib.request
-        import tempfile
-
-        # Create model architecture
-        model = timm.create_model('tf_efficientnet_b2', pretrained=False, num_classes=8)
-
-        # Download weights
-        weights_path = os.path.join(tempfile.gettempdir(), 'enet_b2_8.pt')
-        if not os.path.exists(weights_path):
-            logger.info("Downloading HSEmotion weights...")
-            urllib.request.urlretrieve(_HSEMOTION_URL, weights_path)
-
-        # Load weights
-        state_dict = torch.load(weights_path, map_location='cpu', weights_only=True)
-        model.load_state_dict(state_dict)
-        model.eval()
-
-        # Transform for input images (224x224, ImageNet normalization)
-        transform = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-
-        _hsemotion_model = model
-        _hsemotion_transform = transform
-        logger.info("HSEmotion model loaded (enet_b2_8, AffectNet-8, ~66%% accuracy)")
-        return _hsemotion_model, _hsemotion_transform
-
-    except Exception as e:
-        logger.error("Failed to load HSEmotion: %s", e)
-        return None, None
+# Backend selection: "deepface" (better accuracy, AffectNet) or "fer" (lighter, FER2013)
+FACE_BACKEND = os.environ.get("FACE_BACKEND", "deepface")
 
 
 class FaceEmotionAnalyzer:
     """
-    Analyzes face images and detects emotions using:
-    - HSEmotion (primary): AffectNet dataset, state-of-the-art accuracy, 8 emotions
-    - FER (fallback): FER2013 dataset, lighter model
-    - OpenCV for image processing
+    Analizira slike lica i detektuje emocije koristeći:
+    - DeepFace (default): AffectNet dataset, bolja preciznost
+    - FER (fallback): FER2013 dataset, lakši model
+    - MTCNN za face detection
+    - OpenCV za image processing
     """
 
-    # HSEmotion labels (8 emotions from AffectNet)
-    HSEMOTION_LABELS = ['anger', 'contempt', 'disgust', 'fear', 'happiness', 'neutral', 'sadness', 'surprise']
+    # FER emotion labels
+    EMOTIONS = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
 
-    # HSEmotion → Ekman 7 mapping
+    # Normalizacija FER labela na Ekman standard (isti kao text_analyzer i voice_analyzer)
     LABEL_NORMALIZATION = {
-        "happiness": "joy",
-        "sadness": "sadness",
-        "anger": "anger",
+        "happy": "joy",
+        "sad": "sadness",
+        "angry": "anger",
         "disgust": "disgust",
         "fear": "fear",
         "surprise": "surprise",
         "neutral": "neutral",
-        "contempt": "anger",  # Map contempt to anger family
-        # FER compat labels
-        "happy": "joy",
-        "sad": "sadness",
-        "angry": "anger",
     }
 
     @staticmethod
     def _normalize_emotions(emotions: Dict[str, float]) -> Dict[str, float]:
-        """Normalizes emotion labels to Ekman standard (joy/sadness/anger/...)."""
-        ekman = {
-            "joy": 0.0, "sadness": 0.0, "anger": 0.0,
-            "disgust": 0.0, "fear": 0.0, "surprise": 0.0, "neutral": 0.0,
+        """Normalizira FER labele (happy/sad/angry) na standard (joy/sadness/anger)."""
+        return {
+            FaceEmotionAnalyzer.LABEL_NORMALIZATION.get(k, k): v
+            for k, v in emotions.items()
         }
-        for k, v in emotions.items():
-            mapped = FaceEmotionAnalyzer.LABEL_NORMALIZATION.get(k, k)
-            if mapped in ekman:
-                ekman[mapped] += v
-        return ekman
 
     def __init__(self):
         self._fer_detector = None
-        self._fast_detector = None
-        self._hsemotion = None
-        self._backend = "hsemotion"
+        self._deepface = None
+        self._backend = FACE_BACKEND
         self._is_initialized = False
 
     def _initialize(self):
-        """Lazy initialization — tries HSEmotion first, then FER fallback."""
+        """Lazy initialization of face emotion detector"""
         if self._is_initialized:
             return
 
-        model, transform = get_hsemotion_model()
-        if model is not None:
-            self._hsemotion = (model, transform)
-            self._backend = "hsemotion"
-            self._is_initialized = True
-            return
-
-        logger.warning("HSEmotion not available, falling back to FER")
-        self._initialize_fer()
+        if self._backend == "deepface":
+            try:
+                from deepface import DeepFace
+                self._deepface = DeepFace
+                self._is_initialized = True
+                print("DeepFace initialized (AffectNet backend)")
+            except ImportError:
+                print("DeepFace not available, falling back to FER")
+                self._backend = "fer"
+                self._initialize_fer()
+        else:
+            self._initialize_fer()
 
     def _initialize_fer(self):
         """Initialize FER detector as fallback"""
@@ -139,21 +80,21 @@ class FaceEmotionAnalyzer:
             self._fer_detector = FER(mtcnn=True)
             self._is_initialized = True
             self._backend = "fer"
-            logger.info("FER initialized (FER2013 fallback)")
+            print("FER initialized (FER2013 backend)")
         except Exception as e:
-            logger.error("FER initialization error: %s", e)
+            print(f"FER initialization error: {e}")
             self._is_initialized = False
 
     def analyze_image(self, image_data: bytes, include_xai: bool = True) -> Dict:
         """
-        Analyzes an image and returns emotions with percentages.
+        Analizira sliku i vraća emocije sa procentima.
 
         Args:
-            image_data: Image as bytes
-            include_xai: Whether to include XAI explanations
+            image_data: Slika kao bytes
+            include_xai: Da li uključiti XAI objašnjenja
 
         Returns:
-            Dict with emotions and face box coordinates
+            Dict sa emocijama i face box koordinatama
         """
         start_time = time.time()
 
@@ -163,19 +104,19 @@ class FaceEmotionAnalyzer:
             # Lazy initialize
             self._initialize()
 
-            # Load image from bytes
+            # Učitaj sliku iz bytes
             nparr = np.frombuffer(image_data, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
             if img is None:
                 return self._error_result("Could not decode image")
 
-            # Convert to RGB
+            # Konvertuj u RGB
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-            # Detect emotions — HSEmotion (primary) or FER (fallback)
-            if self._backend == "hsemotion" and self._hsemotion is not None:
-                result = self._analyze_with_hsemotion(img_rgb)
+            # Detektuj emocije — DeepFace ili FER
+            if self._backend == "deepface" and self._deepface is not None:
+                result = self._analyze_with_deepface(img_rgb)
             else:
                 if self._fer_detector is None:
                     from fer import FER
@@ -192,25 +133,25 @@ class FaceEmotionAnalyzer:
                     "face_box": None,
                     "xai_explanation": {
                         "method": "face_detection",
-                        "reasoning": "No face detected in the image. Please try with better lighting."
+                        "reasoning": "Lice nije detektovano na slici. Molimo pokušajte sa boljim osvjetljenjem."
                     },
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                     "timestamp": datetime.now().isoformat()
                 }
 
-            # Take the first detected face
+            # Uzmi prvo detektovano lice
             face = result[0]
             emotions = face["emotions"]
             box = face["box"]
 
-            # Convert to percentages
+            # Konvertuj u procente
             emotions_percent = {k: round(v * 100, 1) for k, v in emotions.items()}
 
-            # Find primary emotion (FER labels for XAI)
+            # Pronađi primarnu emociju (FER labele za XAI)
             primary_emotion_fer = max(emotions, key=emotions.get)
             confidence = round(emotions[primary_emotion_fer] * 100, 1)
 
-            # Normalize labels: happy→joy, sad→sadness, angry→anger
+            # Normaliziraj labele: happy→joy, sad→sadness, angry→anger
             emotions_normalized = self._normalize_emotions(emotions_percent)
             primary_emotion = self.LABEL_NORMALIZATION.get(primary_emotion_fer, primary_emotion_fer)
 
@@ -222,7 +163,7 @@ class FaceEmotionAnalyzer:
                 "height": int(box[3])
             }
 
-            # XAI explanation (uses FER labels because FACS mapping uses the originals)
+            # XAI objašnjenje (koristi FER labele jer FACS mapiranje koristi originalne)
             xai_explanation = None
             if include_xai:
                 xai_explanation = self.generate_explanation(emotions_percent, primary_emotion_fer)
@@ -235,18 +176,9 @@ class FaceEmotionAnalyzer:
                     image_rgb=img_rgb,
                 )
             except Exception as e:
-                logger.warning("Masking detection error: %s", e)
+                print(f"Masking detection error: {e}")
 
             processing_time = (time.time() - start_time) * 1000
-
-            # Calibrate confidence based on contextual factors
-            confidence = self._calibrate_confidence(
-                raw_confidence=confidence,
-                emotions=emotions_normalized,
-                face_box=face_box,
-                image_shape=img_rgb.shape,
-                masking_result=masking_result,
-            )
 
             result = {
                 "success": True,
@@ -266,8 +198,8 @@ class FaceEmotionAnalyzer:
             return result
 
         except Exception as e:
-            logger.error("Face analysis error: %s", e, exc_info=True)
-            return self._error_result("Face analysis failed")
+            print(f"Face analysis error: {e}")
+            return self._error_result(str(e))
 
     def analyze_frame_fast(
         self,
@@ -275,18 +207,22 @@ class FaceEmotionAnalyzer:
         emotion_history: Optional[List[Dict[str, float]]] = None,
     ) -> Dict:
         """
-        Fast analysis of a single frame for live camera.
-        Does not use MTCNN for greater speed.
+        Brza analiza jednog frame-a za live camera.
+        Ne koristi MTCNN za veću brzinu.
 
         Args:
             frame_base64: Base64 encoded frame
-            emotion_history: List of previous emotions for temporal masking analysis
+            emotion_history: Lista prethodnih emocija za temporalnu analizu maskiranja
 
         Returns:
-            Dict with emotions for real-time display
+            Dict sa emocijama za real-time prikaz
         """
         try:
             import cv2
+            from fer import FER
+
+            # Kreiraj brzi detektor (bez MTCNN)
+            fast_detector = FER(mtcnn=False)
 
             # Decode base64
             img_bytes = base64.b64decode(frame_base64)
@@ -302,20 +238,12 @@ class FaceEmotionAnalyzer:
                     "timestamp": time.time()
                 }
 
-            # Reduce resolution for speed
+            # Smanji rezoluciju za brzinu
             scale = 0.5
             small_frame = cv2.resize(frame, None, fx=scale, fy=scale)
 
-            # Use HSEmotion if available, else FER
-            self._initialize()
-            if self._backend == "hsemotion" and self._hsemotion is not None:
-                frame_rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-                result = self._analyze_with_hsemotion(frame_rgb)
-            else:
-                if self._fast_detector is None:
-                    from fer import FER
-                    self._fast_detector = FER(mtcnn=False)
-                result = self._fast_detector.detect_emotions(small_frame)
+            # Detektuj emocije
+            result = fast_detector.detect_emotions(small_frame)
 
             if not result:
                 return {
@@ -329,12 +257,12 @@ class FaceEmotionAnalyzer:
             face = result[0]
             emotions_raw = {k: round(v * 100, 1) for k, v in face["emotions"].items()}
 
-            # Normalize labels: happy→joy, sad→sadness, angry→anger
+            # Normaliziraj labele: happy→joy, sad→sadness, angry→anger
             emotions = self._normalize_emotions(emotions_raw)
             primary_fer = max(emotions_raw, key=emotions_raw.get)
             primary = self.LABEL_NORMALIZATION.get(primary_fer, primary_fer)
 
-            # Scale box back
+            # Skaliraj box nazad
             box = face["box"]
             face_box = {
                 "x": int(box[0] / scale),
@@ -343,7 +271,7 @@ class FaceEmotionAnalyzer:
                 "height": int(box[3] / scale)
             }
 
-            # Masking detection (uses original frame for landmarks)
+            # Masking detection (koristi originalni frame za landmarks)
             masking_result = None
             try:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -353,26 +281,16 @@ class FaceEmotionAnalyzer:
                     emotion_history=emotion_history,
                 )
             except Exception as e:
-                logger.warning("Masking detection error (fast): %s", e)
+                print(f"Masking detection error (fast): {e}")
 
             # Generate XAI explanation
             xai_explanation = self.generate_explanation(emotions_raw, primary_fer)
-
-            # Calibrate confidence based on contextual factors
-            raw_confidence = emotions[primary]
-            calibrated_confidence = self._calibrate_confidence(
-                raw_confidence=raw_confidence,
-                emotions=emotions,
-                face_box=face_box,
-                image_shape=frame.shape,
-                masking_result=masking_result,
-            )
 
             response = {
                 "face_detected": True,
                 "emotions": emotions,
                 "primary_emotion": primary,
-                "confidence": calibrated_confidence,
+                "confidence": emotions[primary],
                 "face_box": face_box,
                 "xai_explanation": xai_explanation,
                 "timestamp": time.time()
@@ -384,181 +302,128 @@ class FaceEmotionAnalyzer:
             return response
 
         except Exception as e:
-            logger.error("Fast frame analysis error: %s", e, exc_info=True)
+            print(f"Fast frame analysis error: {e}")
             return {
                 "face_detected": False,
                 "emotions": {},
-                "error": "Frame analysis failed",
+                "error": str(e),
                 "timestamp": time.time()
             }
 
-    def _analyze_with_hsemotion(self, img_rgb: np.ndarray) -> List[Dict]:
+    def _analyze_with_deepface(self, img_rgb: np.ndarray) -> List[Dict]:
         """
-        Analyze face using HSEmotion EfficientNet-B2 (AffectNet, state-of-the-art).
-        Uses OpenCV Haar cascade for face detection + direct model inference.
+        Analyze face using DeepFace (AffectNet backend).
         Returns result in same format as FER for compatibility.
         """
         try:
-            import cv2
-            import torch
-
-            model, transform = self._hsemotion
-
-            # Detect face using OpenCV Haar cascade
-            img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
-            face_cascade = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            results = self._deepface.analyze(
+                img_path=img_rgb,
+                actions=['emotion'],
+                enforce_detection=False,
+                detector_backend='opencv',  # Faster than mtcnn for DeepFace
+                silent=True,
             )
-            faces = face_cascade.detectMultiScale(img_gray, 1.1, 5, minSize=(48, 48))
 
-            if len(faces) == 0:
-                # Try with full image as face (single person assumption)
-                faces = [(0, 0, img_rgb.shape[1], img_rgb.shape[0])]
+            if not results:
+                return []
+
+            # DeepFace returns list of dicts or single dict
+            if isinstance(results, dict):
+                results = [results]
 
             converted = []
-            for (x, y, w, h) in faces:
-                # Crop face region with margin
-                margin = int(max(w, h) * 0.1)
-                x1 = max(0, x - margin)
-                y1 = max(0, y - margin)
-                x2 = min(img_rgb.shape[1], x + w + margin)
-                y2 = min(img_rgb.shape[0], y + h + margin)
-                face_crop = img_rgb[y1:y2, x1:x2]
+            for face in results:
+                emotions = face.get("emotion", {})
+                # DeepFace returns 0-100 scores, normalize to 0-1 for FER compat
+                emotions_normalized = {k.lower(): v / 100.0 for k, v in emotions.items()}
 
-                if face_crop.size == 0:
-                    continue
+                region = face.get("region", {})
+                box = (
+                    region.get("x", 0),
+                    region.get("y", 0),
+                    region.get("w", 0),
+                    region.get("h", 0),
+                )
 
-                # Transform and predict
-                input_tensor = transform(face_crop).unsqueeze(0)
-                with torch.no_grad():
-                    logits = model(input_tensor)
-                    probs = torch.softmax(logits, dim=1)[0]
-
-                # Build emotions dict (0-1 scale for FER compat)
-                emotions_dict = {}
-                for j, label in enumerate(self.HSEMOTION_LABELS):
-                    emotions_dict[label] = float(probs[j].item())
-
-                box = (int(x), int(y), int(w), int(h))
                 converted.append({
-                    "emotions": emotions_dict,
+                    "emotions": emotions_normalized,
                     "box": box,
                 })
-
-                break  # Take first face only
 
             return converted
 
         except Exception as e:
-            logger.warning("HSEmotion analysis error: %s, falling back to FER", e)
+            print(f"DeepFace analysis error: {e}, falling back to FER")
+            # Fallback to FER
             if self._fer_detector is None:
                 from fer import FER
                 self._fer_detector = FER(mtcnn=True)
             return self._fer_detector.detect_emotions(img_rgb)
 
     def generate_explanation(self, emotions: Dict[str, float], primary_emotion: str) -> Dict:
-        """Generates XAI explanation for face analysis"""
+        """Generiše XAI objašnjenje za face analizu"""
 
-        # Facial Action Units (FACS) for each emotion
+        # Facial Action Units (FACS) za svaku emociju
         facial_action_units = {
             "happy": [
-                "AU6 (Cheek Raiser) - cheek raising",
-                "AU12 (Lip Corner Puller) - smile"
+                "AU6 (Cheek Raiser) - podizanje obraza",
+                "AU12 (Lip Corner Puller) - osmijeh"
             ],
             "sad": [
-                "AU1 (Inner Brow Raiser) - inner brow raising",
-                "AU4 (Brow Lowerer) - brow lowering",
-                "AU15 (Lip Corner Depressor) - lowered lip corners"
+                "AU1 (Inner Brow Raiser) - podizanje unutrašnjeg dijela obrva",
+                "AU4 (Brow Lowerer) - spuštanje obrva",
+                "AU15 (Lip Corner Depressor) - spušteni uglovi usana"
             ],
             "angry": [
-                "AU4 (Brow Lowerer) - furrowed brows",
-                "AU5 (Upper Lid Raiser) - wide open eyes",
-                "AU7 (Lid Tightener) - tightened eyelids"
+                "AU4 (Brow Lowerer) - namrštene obrve",
+                "AU5 (Upper Lid Raiser) - široko otvorene oči",
+                "AU7 (Lid Tightener) - stisnuti kapci"
             ],
             "fear": [
-                "AU1+2 (Brow Raiser) - raised eyebrows",
-                "AU5 (Upper Lid Raiser) - wide open eyes",
-                "AU20 (Lip Stretcher) - stretched lips"
+                "AU1+2 (Brow Raiser) - podignute obrve",
+                "AU5 (Upper Lid Raiser) - široko otvorene oči",
+                "AU20 (Lip Stretcher) - rastegnute usne"
             ],
             "surprise": [
-                "AU1+2 (Brow Raiser) - raised eyebrows",
-                "AU5 (Upper Lid Raiser) - wide open eyes",
-                "AU26 (Jaw Drop) - open mouth"
+                "AU1+2 (Brow Raiser) - podignute obrve",
+                "AU5 (Upper Lid Raiser) - široko otvorene oči",
+                "AU26 (Jaw Drop) - otvorena usta"
             ],
             "disgust": [
-                "AU9 (Nose Wrinkler) - wrinkled nose",
-                "AU15 (Lip Corner Depressor) - lowered lips",
-                "AU16 (Lower Lip Depressor) - lowered lower lip"
+                "AU9 (Nose Wrinkler) - naboran nos",
+                "AU15 (Lip Corner Depressor) - spuštene usne",
+                "AU16 (Lower Lip Depressor) - spuštena donja usna"
             ],
             "neutral": [
-                "No significant facial muscle activations"
+                "Nema značajnih aktivacija facijalnih mišića"
             ]
         }
 
         explanations = {
-            "happy": "Raised cheeks and a smile indicate happiness.",
-            "sad": "Lowered eyebrows and lip corners are characteristic of sadness.",
-            "angry": "Furrowed brows and a tense facial expression indicate anger.",
-            "fear": "Raised eyebrows and wide open eyes suggest fear.",
-            "surprise": "Raised eyebrows and an open mouth indicate surprise.",
-            "disgust": "A wrinkled nose and lowered lips are characteristic of disgust.",
-            "neutral": "The face is relaxed with no pronounced emotions."
+            "happy": "Podignuti obrazi i osmijeh ukazuju na sreću.",
+            "sad": "Spuštene obrve i uglovi usana karakteristični su za tugu.",
+            "angry": "Namrštene obrve i stisnut izraz lica ukazuju na ljutnju.",
+            "fear": "Podignute obrve i široko otvorene oči sugerišu strah.",
+            "surprise": "Podignute obrve i otvorena usta ukazuju na iznenađenje.",
+            "disgust": "Naboran nos i spuštene usne karakteristični su za gađenje.",
+            "neutral": "Lice je opušteno bez izraženih emocija."
         }
 
-        # Sort emotions for breakdown
+        # Sortiraj emocije za breakdown
         sorted_emotions = sorted(emotions.items(), key=lambda x: x[1], reverse=True)
 
         return {
             "method": "facial_action_coding_system",
-            "reasoning": explanations.get(primary_emotion, "Facial expression analysis."),
+            "reasoning": explanations.get(primary_emotion, "Analiza facijalnih ekspresija."),
             "facial_action_units": facial_action_units.get(primary_emotion, []),
             "confidence_breakdown": {e[0]: e[1] for e in sorted_emotions[:4]},
-            "interpretation": f"The model analyzed facial muscles and detected "
-                            f"'{primary_emotion}' as the dominant expression with "
-                            f"{emotions[primary_emotion]}% confidence."
+            "interpretation": f"Model je analizirao facijalne mišiće i detektovao "
+                            f"'{primary_emotion}' kao dominantnu ekspresiju sa "
+                            f"{emotions[primary_emotion]}% sigurnošću."
         }
 
-    def _calibrate_confidence(self, raw_confidence, emotions, face_box=None, image_shape=None, masking_result=None):
-        """
-        Adjusts raw model confidence based on contextual factors:
-        - Face box size relative to image
-        - Emotion distribution clarity (gap between top two emotions)
-        - Masking detection penalty
-        Returns calibrated confidence clamped to [5.0, 99.0].
-        """
-        calibrated = raw_confidence
-
-        # 1. Face box size penalty
-        if face_box is not None and image_shape is not None:
-            img_h, img_w = image_shape[:2]
-            image_area = img_h * img_w
-            if image_area > 0:
-                face_area = face_box["width"] * face_box["height"]
-                face_ratio = face_area / image_area
-                if face_ratio < 0.10:
-                    calibrated -= 15.0
-                elif face_ratio < 0.30:
-                    calibrated -= 5.0
-
-        # 2. Emotion distribution clarity penalty
-        if emotions and len(emotions) >= 2:
-            sorted_scores = sorted(emotions.values(), reverse=True)
-            top_gap = sorted_scores[0] - sorted_scores[1]
-            if top_gap < 10.0:
-                calibrated -= 10.0
-            # No change if gap > 30%; implicit (no addition)
-
-        # 3. Masking penalty
-        if masking_result and masking_result.get("masking_detected"):
-            masking_conf = masking_result.get("masking_confidence", 0.0)
-            calibrated -= masking_conf * 20.0
-
-        # Clamp to [5.0, 99.0]
-        calibrated = max(5.0, min(99.0, calibrated))
-        return round(calibrated, 1)
-
     def _error_result(self, error_message: str) -> Dict:
-        """Returns a standard error response"""
+        """Vraća standardni error response"""
         return {
             "success": False,
             "face_detected": False,

@@ -4,34 +4,24 @@ Accepts text + audio + image in a single request.
 Returns fused emotion vector with incongruence detection.
 """
 
-import logging
-
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import Optional
 from services.text_analyzer import text_analyzer
 from services.voice_analyzer import voice_analyzer
 from services.face_analyzer import face_analyzer
 from services.fusion_engine import fusion_engine
-from dependencies import limiter
-from api.auth import get_current_user
-from api.file_validation import validate_audio_bytes, validate_image_bytes
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
 @router.post("/multimodal")
-@limiter.limit("10/minute")
 async def analyze_multimodal(
-    request: Request,
     text: Optional[str] = Form(None),
     audio: Optional[UploadFile] = File(None),
     image: Optional[UploadFile] = File(None),
     include_xai: bool = Form(True),
     user_id: Optional[str] = Form(None),
     session_id: Optional[str] = Form(None),
-    user: dict = Depends(get_current_user),
 ):
     """
     Multimodal emotion analysis — combines text, voice, and face.
@@ -71,8 +61,6 @@ async def analyze_multimodal(
             audio_data = await audio.read()
             if len(audio_data) > 10 * 1024 * 1024:
                 raise HTTPException(status_code=400, detail="Audio file too large (max 10MB)")
-            if not validate_audio_bytes(audio_data):
-                raise HTTPException(status_code=400, detail="Invalid audio file content")
             voice_result = voice_analyzer.analyze(audio_data, include_xai=include_xai)
 
         # Face/image analysis
@@ -80,8 +68,6 @@ async def analyze_multimodal(
             image_data = await image.read()
             if len(image_data) > 5 * 1024 * 1024:
                 raise HTTPException(status_code=400, detail="Image file too large (max 5MB)")
-            if not validate_image_bytes(image_data):
-                raise HTTPException(status_code=400, detail="Invalid image file content")
             face_result = face_analyzer.analyze_image(
                 image_data=image_data, include_xai=include_xai
             )
@@ -98,16 +84,14 @@ async def analyze_multimodal(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Multimodal analysis failed: %s", e, exc_info=True)
         raise HTTPException(
             status_code=500,
-            detail="Internal analysis error"
+            detail=f"Multimodal analysis failed: {str(e)}"
         )
 
 
 @router.get("/multimodal/info")
-@limiter.limit("60/minute")
-async def get_multimodal_info(request: Request, current_user: dict = Depends(get_current_user)):
+async def get_multimodal_info():
     """Returns information about the multimodal fusion system."""
     return {
         "description": "Multimodal Emotion Fusion with Incongruence Detection",
