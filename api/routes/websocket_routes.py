@@ -14,7 +14,7 @@ router = APIRouter()
 
 
 class ConnectionManager:
-    """Upravlja WebSocket konekcijama"""
+    """Manages WebSocket connections"""
 
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -37,13 +37,13 @@ manager = ConnectionManager()
 @router.websocket("/camera")
 async def websocket_camera_endpoint(websocket: WebSocket):
     """
-    WebSocket endpoint za live camera emotion analysis.
-    Sada uključuje i detekciju maskiranih emocija (lažni osmijeh, potisnute emocije).
+    WebSocket endpoint for live camera emotion analysis.
+    Now includes detection of masked emotions (fake smile, suppressed emotions).
 
-    Client šalje: { "frame": "base64_encoded_image" }
-    Server vraća: { "face_detected": bool, "emotions": {...}, "primary_emotion": str, "masking": {...} }
+    Client sends: { "frame": "base64_encoded_image" }
+    Server returns: { "face_detected": bool, "emotions": {...}, "primary_emotion": str, "masking": {...} }
 
-    Primjer korištenja u Flutter/Dart:
+    Usage example in Flutter/Dart:
     ```dart
     final channel = WebSocketChannel.connect(Uri.parse('ws://server/live/camera'));
     channel.sink.add(jsonEncode({'frame': base64Frame}));
@@ -62,7 +62,7 @@ async def websocket_camera_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # Prima frame od klijenta
+            # Receive frame from client
             data = await websocket.receive_text()
 
             try:
@@ -75,19 +75,19 @@ async def websocket_camera_endpoint(websocket: WebSocket):
                     })
                     continue
 
-                # Analiziraj frame sa emotion history za masking detekciju
+                # Analyze frame with emotion history for masking detection
                 result = face_analyzer.analyze_frame_fast(
                     frame_data["frame"],
                     emotion_history=emotion_history,
                 )
 
-                # Dodaj u historiju ako je lice detektovano
+                # Add to history if face was detected
                 if result.get("face_detected") and result.get("emotions"):
                     emotion_history.append(result["emotions"])
                     if len(emotion_history) > max_history:
                         emotion_history.pop(0)
 
-                # Pošalji rezultat
+                # Send result
                 await manager.send_json(websocket, result)
 
             except json.JSONDecodeError:
@@ -106,17 +106,17 @@ async def websocket_camera_endpoint(websocket: WebSocket):
 @router.websocket("/camera/session")
 async def websocket_camera_session(websocket: WebSocket):
     """
-    WebSocket za kompletnu live sesiju sa agregiranim rezultatima.
+    WebSocket for a complete live session with aggregated results.
 
-    Pored real-time emocija, prati i:
-    - Prosječne emocije tokom sesije
-    - Timeline emocija
-    - Dominantna emocija
+    In addition to real-time emotions, it also tracks:
+    - Average emotions during the session
+    - Emotion timeline
+    - Dominant emotion
 
-    Client poruke:
-    - {"action": "start"} - Počni sesiju
-    - {"action": "frame", "frame": "base64"} - Pošalji frame
-    - {"action": "end"} - Završi sesiju i dobij sumarni rezultat
+    Client messages:
+    - {"action": "start"} - Start session
+    - {"action": "frame", "frame": "base64"} - Send frame
+    - {"action": "end"} - End session and get summary result
     """
     await manager.connect(websocket)
 
@@ -145,7 +145,7 @@ async def websocket_camera_session(websocket: WebSocket):
                 action = message.get("action", "frame")
 
                 if action == "start":
-                    # Počni novu sesiju
+                    # Start new session
                     import time
                     session_data = {
                         "frames_analyzed": 0,
@@ -168,14 +168,14 @@ async def websocket_camera_session(websocket: WebSocket):
                     if "frame" not in message:
                         continue
 
-                    # Analiziraj frame sa emotion history za masking detekciju
+                    # Analyze frame with emotion history for masking detection
                     result = face_analyzer.analyze_frame_fast(
                         message["frame"],
                         emotion_history=emotion_history,
                     )
 
                     if result.get("face_detected"):
-                        # Ažuriraj session data
+                        # Update session data
                         session_data["frames_analyzed"] += 1
                         emotions = result.get("emotions", {})
 
@@ -183,7 +183,7 @@ async def websocket_camera_session(websocket: WebSocket):
                             if emotion in session_data["emotion_sums"]:
                                 session_data["emotion_sums"][emotion] += score
 
-                        # Dodaj u emotion history
+                        # Add to emotion history
                         emotion_history.append(emotions)
                         if len(emotion_history) > max_history:
                             emotion_history.pop(0)
@@ -198,7 +198,7 @@ async def websocket_camera_session(websocket: WebSocket):
                                 "underlying_emotion": result["masking"].get("underlying_emotion"),
                             })
 
-                        # Dodaj u timeline (svaki 5. frame)
+                        # Add to timeline (every 5th frame)
                         if session_data["frames_analyzed"] % 5 == 0:
                             session_data["emotion_timeline"].append({
                                 "timestamp": result["timestamp"],
@@ -206,22 +206,22 @@ async def websocket_camera_session(websocket: WebSocket):
                                 "primary": result.get("primary_emotion")
                             })
 
-                    # Pošalji real-time rezultat
+                    # Send real-time result
                     await manager.send_json(websocket, result)
 
                 elif action == "end":
-                    # Završi sesiju i vrati sumarni rezultat
+                    # End session and return summary result
                     import time
                     session_data["is_active"] = False
 
                     if session_data["frames_analyzed"] > 0:
-                        # Izračunaj prosječne emocije
+                        # Calculate average emotions
                         avg_emotions = {
                             k: round(v / session_data["frames_analyzed"], 1)
                             for k, v in session_data["emotion_sums"].items()
                         }
 
-                        # Pronađi dominantnu emociju
+                        # Find dominant emotion
                         dominant = max(avg_emotions, key=avg_emotions.get)
 
                         # Build masking summary
@@ -261,12 +261,12 @@ async def websocket_camera_session(websocket: WebSocket):
                             "masking_summary": masking_summary,
                             "xai_explanation": {
                                 "method": "temporal_emotion_analysis",
-                                "reasoning": f"Tokom sesije od {session_data['frames_analyzed']} "
-                                           f"analiziranih frameova, dominantna emocija je bila "
-                                           f"'{dominant}' sa prosječnim skorom od "
+                                "reasoning": f"During the session of {session_data['frames_analyzed']} "
+                                           f"analyzed frames, the dominant emotion was "
+                                           f"'{dominant}' with an average score of "
                                            f"{avg_emotions[dominant]}%."
-                                           + (f" Detektovano je {len(masking_events)} "
-                                              f"mogućih maskiranja emocija."
+                                           + (f" {len(masking_events)} possible "
+                                              f"emotion masking events were detected."
                                               if masking_events else "")
                             }
                         }
@@ -292,9 +292,9 @@ async def websocket_camera_session(websocket: WebSocket):
 @router.websocket("/camera/conversation")
 async def websocket_camera_conversation(websocket: WebSocket):
     """
-    WebSocket endpoint za konverzacijski AI sa live kamerom.
+    WebSocket endpoint for conversational AI with live camera.
 
-    Multipleksira frejmove, tekst, gesture frejmove i sesiju.
+    Multiplexes frames, text, gesture frames and session.
 
     Client → Server:
     - {"type": "session_start"}
@@ -429,7 +429,7 @@ async def websocket_camera_conversation(websocket: WebSocket):
                         print(f"Text response error: {e}")
                         await manager.send_json(websocket, {
                             "type": "ai_message",
-                            "text": "Hvala ti. Nastavi kad budeš spreman/spremna.",
+                            "text": "Thank you. Continue when you are ready.",
                             "emotion_observation": None,
                             "suggested_actions": [],
                         })
@@ -443,7 +443,7 @@ async def websocket_camera_conversation(websocket: WebSocket):
                     # Feed validation context to conversation engine
                     if not correct and emotion:
                         try:
-                            validation_context = f"[Korisnik kaze da NIJE {emotion}. Pitaj ga kako se zaista osjeca.]"
+                            validation_context = f"[User says they are NOT {emotion}. Ask them how they really feel.]"
                             ai_response = await asyncio.to_thread(
                                 conversation_engine.generate_response,
                                 session_id,
@@ -512,7 +512,7 @@ async def websocket_camera_conversation(websocket: WebSocket):
                         print(f"Summary generation error: {e}")
                         await manager.send_json(websocket, {
                             "type": "session_summary",
-                            "summary": "Sesija završena.",
+                            "summary": "Session ended.",
                             "message_count": frame_count,
                         })
                     finally:

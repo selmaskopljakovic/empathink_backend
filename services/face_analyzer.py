@@ -20,17 +20,17 @@ FACE_BACKEND = os.environ.get("FACE_BACKEND", "deepface")
 
 class FaceEmotionAnalyzer:
     """
-    Analizira slike lica i detektuje emocije koristeći:
-    - DeepFace (default): AffectNet dataset, bolja preciznost
-    - FER (fallback): FER2013 dataset, lakši model
-    - MTCNN za face detection
-    - OpenCV za image processing
+    Analyzes facial images and detects emotions using:
+    - DeepFace (default): AffectNet dataset, better accuracy
+    - FER (fallback): FER2013 dataset, lighter model
+    - MTCNN for face detection
+    - OpenCV for image processing
     """
 
     # FER emotion labels
     EMOTIONS = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
 
-    # Normalizacija FER labela na Ekman standard (isti kao text_analyzer i voice_analyzer)
+    # Normalization of FER labels to Ekman standard (same as text_analyzer and voice_analyzer)
     LABEL_NORMALIZATION = {
         "happy": "joy",
         "sad": "sadness",
@@ -43,7 +43,7 @@ class FaceEmotionAnalyzer:
 
     @staticmethod
     def _normalize_emotions(emotions: Dict[str, float]) -> Dict[str, float]:
-        """Normalizira FER labele (happy/sad/angry) na standard (joy/sadness/anger)."""
+        """Normalizes FER labels (happy/sad/angry) to standard (joy/sadness/anger)."""
         return {
             FaceEmotionAnalyzer.LABEL_NORMALIZATION.get(k, k): v
             for k, v in emotions.items()
@@ -87,14 +87,14 @@ class FaceEmotionAnalyzer:
 
     def analyze_image(self, image_data: bytes, include_xai: bool = True) -> Dict:
         """
-        Analizira sliku i vraća emocije sa procentima.
+        Analyzes an image and returns emotions with percentages.
 
         Args:
-            image_data: Slika kao bytes
-            include_xai: Da li uključiti XAI objašnjenja
+            image_data: Image as bytes
+            include_xai: Whether to include XAI explanations
 
         Returns:
-            Dict sa emocijama i face box koordinatama
+            Dict with emotions and face box coordinates
         """
         start_time = time.time()
 
@@ -104,17 +104,17 @@ class FaceEmotionAnalyzer:
             # Lazy initialize
             self._initialize()
 
-            # Učitaj sliku iz bytes
+            # Load image from bytes
             nparr = np.frombuffer(image_data, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
             if img is None:
                 return self._error_result("Could not decode image")
 
-            # Konvertuj u RGB
+            # Convert to RGB
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-            # Detektuj emocije — DeepFace ili FER
+            # Detect emotions — DeepFace or FER
             if self._backend == "deepface" and self._deepface is not None:
                 result = self._analyze_with_deepface(img_rgb)
             else:
@@ -133,25 +133,25 @@ class FaceEmotionAnalyzer:
                     "face_box": None,
                     "xai_explanation": {
                         "method": "face_detection",
-                        "reasoning": "Lice nije detektovano na slici. Molimo pokušajte sa boljim osvjetljenjem."
+                        "reasoning": "No face detected in the image. Please try with better lighting."
                     },
                     "processing_time_ms": round((time.time() - start_time) * 1000, 2),
                     "timestamp": datetime.now().isoformat()
                 }
 
-            # Uzmi prvo detektovano lice
+            # Take the first detected face
             face = result[0]
             emotions = face["emotions"]
             box = face["box"]
 
-            # Konvertuj u procente
+            # Convert to percentages
             emotions_percent = {k: round(v * 100, 1) for k, v in emotions.items()}
 
-            # Pronađi primarnu emociju (FER labele za XAI)
+            # Find primary emotion (FER labels for XAI)
             primary_emotion_fer = max(emotions, key=emotions.get)
             confidence = round(emotions[primary_emotion_fer] * 100, 1)
 
-            # Normaliziraj labele: happy→joy, sad→sadness, angry→anger
+            # Normalize labels: happy->joy, sad->sadness, angry->anger
             emotions_normalized = self._normalize_emotions(emotions_percent)
             primary_emotion = self.LABEL_NORMALIZATION.get(primary_emotion_fer, primary_emotion_fer)
 
@@ -163,7 +163,7 @@ class FaceEmotionAnalyzer:
                 "height": int(box[3])
             }
 
-            # XAI objašnjenje (koristi FER labele jer FACS mapiranje koristi originalne)
+            # XAI explanation (uses FER labels because FACS mapping uses originals)
             xai_explanation = None
             if include_xai:
                 xai_explanation = self.generate_explanation(emotions_percent, primary_emotion_fer)
@@ -207,21 +207,21 @@ class FaceEmotionAnalyzer:
         emotion_history: Optional[List[Dict[str, float]]] = None,
     ) -> Dict:
         """
-        Brza analiza jednog frame-a za live camera.
-        Ne koristi MTCNN za veću brzinu.
+        Fast analysis of a single frame for live camera.
+        Does not use MTCNN for greater speed.
 
         Args:
             frame_base64: Base64 encoded frame
-            emotion_history: Lista prethodnih emocija za temporalnu analizu maskiranja
+            emotion_history: List of previous emotions for temporal masking analysis
 
         Returns:
-            Dict sa emocijama za real-time prikaz
+            Dict with emotions for real-time display
         """
         try:
             import cv2
             from fer import FER
 
-            # Kreiraj brzi detektor (bez MTCNN)
+            # Create fast detector (without MTCNN)
             fast_detector = FER(mtcnn=False)
 
             # Decode base64
@@ -238,11 +238,11 @@ class FaceEmotionAnalyzer:
                     "timestamp": time.time()
                 }
 
-            # Smanji rezoluciju za brzinu
+            # Reduce resolution for speed
             scale = 0.5
             small_frame = cv2.resize(frame, None, fx=scale, fy=scale)
 
-            # Detektuj emocije
+            # Detect emotions
             result = fast_detector.detect_emotions(small_frame)
 
             if not result:
@@ -257,12 +257,12 @@ class FaceEmotionAnalyzer:
             face = result[0]
             emotions_raw = {k: round(v * 100, 1) for k, v in face["emotions"].items()}
 
-            # Normaliziraj labele: happy→joy, sad→sadness, angry→anger
+            # Normalize labels: happy->joy, sad->sadness, angry->anger
             emotions = self._normalize_emotions(emotions_raw)
             primary_fer = max(emotions_raw, key=emotions_raw.get)
             primary = self.LABEL_NORMALIZATION.get(primary_fer, primary_fer)
 
-            # Skaliraj box nazad
+            # Scale box back
             box = face["box"]
             face_box = {
                 "x": int(box[0] / scale),
@@ -271,7 +271,7 @@ class FaceEmotionAnalyzer:
                 "height": int(box[3] / scale)
             }
 
-            # Masking detection (koristi originalni frame za landmarks)
+            # Masking detection (uses original frame for landmarks)
             masking_result = None
             try:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -361,69 +361,69 @@ class FaceEmotionAnalyzer:
             return self._fer_detector.detect_emotions(img_rgb)
 
     def generate_explanation(self, emotions: Dict[str, float], primary_emotion: str) -> Dict:
-        """Generiše XAI objašnjenje za face analizu"""
+        """Generates XAI explanation for face analysis"""
 
-        # Facial Action Units (FACS) za svaku emociju
+        # Facial Action Units (FACS) for each emotion
         facial_action_units = {
             "happy": [
-                "AU6 (Cheek Raiser) - podizanje obraza",
-                "AU12 (Lip Corner Puller) - osmijeh"
+                "AU6 (Cheek Raiser) - raised cheeks",
+                "AU12 (Lip Corner Puller) - smile"
             ],
             "sad": [
-                "AU1 (Inner Brow Raiser) - podizanje unutrašnjeg dijela obrva",
-                "AU4 (Brow Lowerer) - spuštanje obrva",
-                "AU15 (Lip Corner Depressor) - spušteni uglovi usana"
+                "AU1 (Inner Brow Raiser) - raised inner brow",
+                "AU4 (Brow Lowerer) - lowered brows",
+                "AU15 (Lip Corner Depressor) - lowered lip corners"
             ],
             "angry": [
-                "AU4 (Brow Lowerer) - namrštene obrve",
-                "AU5 (Upper Lid Raiser) - široko otvorene oči",
-                "AU7 (Lid Tightener) - stisnuti kapci"
+                "AU4 (Brow Lowerer) - furrowed brows",
+                "AU5 (Upper Lid Raiser) - wide open eyes",
+                "AU7 (Lid Tightener) - tightened eyelids"
             ],
             "fear": [
-                "AU1+2 (Brow Raiser) - podignute obrve",
-                "AU5 (Upper Lid Raiser) - široko otvorene oči",
-                "AU20 (Lip Stretcher) - rastegnute usne"
+                "AU1+2 (Brow Raiser) - raised eyebrows",
+                "AU5 (Upper Lid Raiser) - wide open eyes",
+                "AU20 (Lip Stretcher) - stretched lips"
             ],
             "surprise": [
-                "AU1+2 (Brow Raiser) - podignute obrve",
-                "AU5 (Upper Lid Raiser) - široko otvorene oči",
-                "AU26 (Jaw Drop) - otvorena usta"
+                "AU1+2 (Brow Raiser) - raised eyebrows",
+                "AU5 (Upper Lid Raiser) - wide open eyes",
+                "AU26 (Jaw Drop) - open mouth"
             ],
             "disgust": [
-                "AU9 (Nose Wrinkler) - naboran nos",
-                "AU15 (Lip Corner Depressor) - spuštene usne",
-                "AU16 (Lower Lip Depressor) - spuštena donja usna"
+                "AU9 (Nose Wrinkler) - wrinkled nose",
+                "AU15 (Lip Corner Depressor) - lowered lips",
+                "AU16 (Lower Lip Depressor) - lowered lower lip"
             ],
             "neutral": [
-                "Nema značajnih aktivacija facijalnih mišića"
+                "No significant facial muscle activations"
             ]
         }
 
         explanations = {
-            "happy": "Podignuti obrazi i osmijeh ukazuju na sreću.",
-            "sad": "Spuštene obrve i uglovi usana karakteristični su za tugu.",
-            "angry": "Namrštene obrve i stisnut izraz lica ukazuju na ljutnju.",
-            "fear": "Podignute obrve i široko otvorene oči sugerišu strah.",
-            "surprise": "Podignute obrve i otvorena usta ukazuju na iznenađenje.",
-            "disgust": "Naboran nos i spuštene usne karakteristični su za gađenje.",
-            "neutral": "Lice je opušteno bez izraženih emocija."
+            "happy": "Raised cheeks and a smile indicate happiness.",
+            "sad": "Lowered brows and lip corners are characteristic of sadness.",
+            "angry": "Furrowed brows and a tense facial expression indicate anger.",
+            "fear": "Raised eyebrows and wide open eyes suggest fear.",
+            "surprise": "Raised eyebrows and an open mouth indicate surprise.",
+            "disgust": "A wrinkled nose and lowered lips are characteristic of disgust.",
+            "neutral": "The face is relaxed without pronounced emotions."
         }
 
-        # Sortiraj emocije za breakdown
+        # Sort emotions for breakdown
         sorted_emotions = sorted(emotions.items(), key=lambda x: x[1], reverse=True)
 
         return {
             "method": "facial_action_coding_system",
-            "reasoning": explanations.get(primary_emotion, "Analiza facijalnih ekspresija."),
+            "reasoning": explanations.get(primary_emotion, "Facial expression analysis."),
             "facial_action_units": facial_action_units.get(primary_emotion, []),
             "confidence_breakdown": {e[0]: e[1] for e in sorted_emotions[:4]},
-            "interpretation": f"Model je analizirao facijalne mišiće i detektovao "
-                            f"'{primary_emotion}' kao dominantnu ekspresiju sa "
-                            f"{emotions[primary_emotion]}% sigurnošću."
+            "interpretation": f"The model analyzed facial muscles and detected "
+                            f"'{primary_emotion}' as the dominant expression with "
+                            f"{emotions[primary_emotion]}% confidence."
         }
 
     def _error_result(self, error_message: str) -> Dict:
-        """Vraća standardni error response"""
+        """Returns a standard error response"""
         return {
             "success": False,
             "face_detected": False,

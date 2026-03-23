@@ -17,15 +17,15 @@ async def analyze_image(
     session_id: Optional[str] = Form(None)
 ):
     """
-    Analizira sliku lica i vraća emocije sa procentima.
+    Analyzes a facial image and returns emotions with percentages.
 
-    - **image**: Slika lica (JPEG, PNG, WebP)
-    - **include_xai**: Da li uključiti XAI objašnjenja (default: true)
+    - **image**: Facial image (JPEG, PNG, WebP)
+    - **include_xai**: Whether to include XAI explanations (default: true)
 
     Returns:
-        ImageAnalysisResult sa emocijama i face box koordinatama
+        ImageAnalysisResult with emotions and face box coordinates
     """
-    # Provjeri format - be flexible with content types
+    # Check format - be flexible with content types
     allowed_formats = [
         "image/jpeg", "image/png", "image/webp", "image/jpg",
         "application/octet-stream",  # Sometimes sent by web browsers
@@ -40,14 +40,14 @@ async def analyze_image(
         )
 
     try:
-        # Čitaj image bytes
+        # Read image bytes
         image_data = await image.read()
 
-        # Provjeri veličinu (max 5MB)
+        # Check size (max 5MB)
         if len(image_data) > 5 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Image file too large (max 5MB)")
 
-        # Analiziraj
+        # Analyze
         result = face_analyzer.analyze_image(
             image_data=image_data,
             include_xai=include_xai
@@ -64,7 +64,7 @@ async def analyze_image(
 @router.get("/image/models")
 async def get_image_models():
     """
-    Vraća informacije o modelima za image analizu.
+    Returns information about models used for image analysis.
     """
     return {
         "face_detection": {
@@ -79,7 +79,7 @@ async def get_image_models():
         },
         "xai_method": {
             "name": "Facial Action Coding System (FACS)",
-            "description": "Objašnjenja bazirana na aktivaciji facijalnih mišića",
+            "description": "Explanations based on facial muscle activation",
             "reference": "Ekman & Friesen (1978)"
         },
         "supported_formats": ["JPEG", "PNG", "WebP"],

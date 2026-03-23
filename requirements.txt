@@ -1,38 +1,38 @@
 # EmpaThink AI Backend - Requirements
 # Python 3.11.x compatible
-# Optimized for Railway deployment (smaller packages)
+# Optimized for Railway deployment
 
 # Web Framework
-fastapi>=0.104.0,<0.115.0
-uvicorn[standard]>=0.24.0,<0.31.0
-python-multipart>=0.0.6,<0.1.0
-websockets>=12.0,<14.0
+fastapi>=0.104.0,<1.0.0
+uvicorn[standard]>=0.24.0,<1.0.0
+python-multipart>=0.0.6,<1.0.0
+websockets>=12.0,<15.0
 
-# ML / Deep Learning - CPU only (much smaller!)
+# ML / Deep Learning - CPU only
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch>=2.1.0,<2.5.0
-transformers>=4.35.0,<4.46.0
+torch>=2.1.0,<3.0.0
+transformers>=4.35.0,<5.0.0
 
 # Text Analysis
-textblob>=0.17.1,<0.19.0
+textblob>=0.17.1,<1.0.0
 
 # Audio Analysis
-librosa>=0.10.1,<0.11.0
-soundfile>=0.12.1,<0.13.0
-numpy>=1.26.0,<2.0.0
+librosa>=0.10.1,<1.0.0
+soundfile>=0.12.1,<1.0.0
+numpy>=1.26.0,<2.1.0
 
 # Image/Face Analysis
 deepface>=0.0.89,<1.0.0
 fer>=22.5.0,<23.0.0
-opencv-python-headless>=4.8.0,<4.11.0
-pillow>=10.1.0,<11.0.0
-moviepy>=1.0.3,<2.0.0
-tensorflow-cpu>=2.15.0,<2.17.0
-tf-keras>=2.15.0,<2.17.0
-mediapipe>=0.10.0,<0.11.0
+opencv-python-headless>=4.8.0,<5.0.0
+pillow>=10.1.0,<12.0.0
+moviepy>=1.0.3,<3.0.0
+tensorflow-cpu>=2.15.0,<2.19.0
+tf-keras>=2.15.0,<2.19.0
+mediapipe>=0.10.0,<1.0.0
 
 # SHAP (Explainable AI)
-shap>=0.43.0,<0.46.0
+shap>=0.43.0,<1.0.0
 
 # Conversational AI (Gemini)
 google-generativeai>=0.3.0,<1.0.0
@@ -41,5 +41,8 @@ google-generativeai>=0.3.0,<1.0.0
 python-dotenv>=1.0.0,<2.0.0
 pydantic>=2.5.0,<3.0.0
 
-# Firebase Admin (optional - for server-side operations)
-# Uncomment if needed: firebase-admin>=6.2.0,<7.0.0
+# Rate limiting
+slowapi>=0.1.9,<1.0.0
+
+# Firebase Admin
+firebase-admin>=6.2.0,<7.0.0

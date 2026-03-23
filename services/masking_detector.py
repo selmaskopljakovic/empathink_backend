@@ -13,9 +13,9 @@ from typing import Dict, List, Optional, Tuple
 
 class MaskingDetector:
     """
-    Detektuje lažni osmijeh i maskirane emocije kroz tri sloja analize.
-    Duchenne osmijeh = AU6 (cheek raiser) + AU12 (lip corner puller) → iskren
-    Fake osmijeh = samo AU12 (usta se smiju, oči ne) → neiskren
+    Detects fake smiles and masked emotions through three layers of analysis.
+    Duchenne smile = AU6 (cheek raiser) + AU12 (lip corner puller) -> genuine
+    Fake smile = only AU12 (mouth smiles but eyes don't) -> non-genuine
     """
 
     # Conflicting emotion pairs: surface → possible underlying
@@ -433,29 +433,29 @@ class MaskingDetector:
         """Builds XAI explanation for the masking detection"""
         type_explanations = {
             "fake_smile": (
-                "Moguci lazni osmijeh detektovan. Analiza pokazuje znakove osmijeha "
-                "koji ne ukljucuje tipicne mišicne aktivacije iskrene radosti "
-                "(Duchenne osmijeh)."
+                "Possible fake smile detected. Analysis shows signs of a smile "
+                "that does not include typical muscle activations of genuine happiness "
+                "(Duchenne smile)."
             ),
             "suppressed_anger": (
-                "Moguce potisnuta ljutnja. Povrsinski izraz pokazuje smirenost, "
-                "ali su prisutni znakovi ljutnje u pozadini."
+                "Possible suppressed anger. The surface expression shows calmness, "
+                "but signs of anger are present in the background."
             ),
             "nervous_smile": (
-                "Moguci nervozni osmijeh. Osmijeh je prisutan ali uz znakove "
-                "straha ili anksioznosti."
+                "Possible nervous smile. A smile is present but with signs "
+                "of fear or anxiety."
             ),
             "suppressed_sadness": (
-                "Moguce potisnuta tuga. Izraz lica djeluje neutralno ali su "
-                "prisutni pokazatelji tuge."
+                "Possible suppressed sadness. The facial expression appears neutral but "
+                "indicators of sadness are present."
             ),
             "mixed_signals": (
-                "Mijesani emocionalni signali. Vise emocija je prisutno sa slicnim "
-                "intenzitetom, sto moze ukazivati na kompleksno emocionalno stanje."
+                "Mixed emotional signals. Multiple emotions are present with similar "
+                "intensity, which may indicate a complex emotional state."
             ),
             "emotional_instability": (
-                "Emocionalna nestabilnost detektovana. Ceste promjene dominantne "
-                "emocije mogu ukazivati na unutrasnji konflikt."
+                "Emotional instability detected. Frequent changes in the dominant "
+                "emotion may indicate an internal conflict."
             ),
         }
 
@@ -463,28 +463,28 @@ class MaskingDetector:
         base_type = masking_type.replace("sudden_", "")
         reasoning = type_explanations.get(
             base_type,
-            "Moguce maskiranje emocija detektovano na osnovu analize facijalnih "
-            "ekspresija i ponasanja."
+            "Possible emotion masking detected based on analysis of facial "
+            "expressions and behavior."
         )
         if masking_type.startswith("sudden_"):
-            reasoning = "Nagla promjena emocija. " + reasoning
+            reasoning = "Sudden emotion change. " + reasoning
 
         layers_used = list(set(s["layer"] for s in all_signals))
         methods = []
         if "distribution" in layers_used:
-            methods.append("analiza distribucije emocija")
+            methods.append("emotion distribution analysis")
         if "temporal" in layers_used:
-            methods.append("temporalna analiza")
+            methods.append("temporal analysis")
         if "landmarks" in layers_used:
-            methods.append("analiza facijalnih landmarka (AU6/AU12)")
+            methods.append("facial landmark analysis (AU6/AU12)")
 
         return {
             "method": "masking_detection",
             "reasoning": reasoning,
             "methods_used": methods,
             "layers_triggered": len(layers_used),
-            "note": "Ovo je indikacija, ne dijagnoza. Rezultati su bazirani na "
-                    "statistickoj analizi facijalnih ekspresija.",
+            "note": "This is an indication, not a diagnosis. Results are based on "
+                    "statistical analysis of facial expressions.",
         }
 
 

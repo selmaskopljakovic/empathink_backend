@@ -7,7 +7,7 @@ import time
 from typing import Dict, List, Optional
 from datetime import datetime
 
-# Lazy loading za brži startup
+# Lazy loading for faster startup
 _emotion_classifier = None
 _sentiment_analyzer = None
 
@@ -21,7 +21,7 @@ def get_emotion_classifier():
             "text-classification",
             model="j-hartmann/emotion-english-distilroberta-base",
             top_k=None,
-            device=-1  # CPU, promijeni u 0 za GPU
+            device=-1  # CPU, change to 0 for GPU
         )
     return _emotion_classifier
 
@@ -41,13 +41,13 @@ def get_sentiment_analyzer():
 
 class TextEmotionAnalyzer:
     """
-    Analizira tekst i detektuje emocije koristeći:
-    - HuggingFace Transformers (DistilRoBERTa) za detekciju emocija
-    - RoBERTa za sentiment analizu
-    - TextBlob za dodatne metrike
+    Analyzes text and detects emotions using:
+    - HuggingFace Transformers (DistilRoBERTa) for emotion detection
+    - RoBERTa for sentiment analysis
+    - TextBlob for additional metrics
     """
 
-    # Mapiranje emocija na Ekman model
+    # Mapping emotions to the Ekman model
     EMOTION_MAPPING = {
         'anger': 'anger',
         'disgust': 'disgust',
@@ -60,34 +60,34 @@ class TextEmotionAnalyzer:
 
     def analyze(self, text: str, include_xai: bool = True) -> Dict:
         """
-        Analizira tekst i vraća emocije sa procentima.
+        Analyzes text and returns emotions with percentages.
 
         Args:
-            text: Tekst za analizu
-            include_xai: Da li uključiti XAI objašnjenja (za Group B)
+            text: Text to analyze
+            include_xai: Whether to include XAI explanations (for Group B)
 
         Returns:
-            Dict sa emocijama, sentimentom i XAI objašnjenjima
+            Dict with emotions, sentiment and XAI explanations
         """
         start_time = time.time()
 
         if not text or not text.strip():
             return self._empty_result()
 
-        # Detekcija emocija
+        # Emotion detection
         emotions = self._detect_emotions(text)
 
-        # Sentiment analiza
+        # Sentiment analysis
         sentiment = self._analyze_sentiment(text)
 
-        # Text metrike
+        # Text metrics
         text_metrics = self._calculate_metrics(text)
 
-        # Pronađi primarnu emociju
+        # Find primary emotion
         primary_emotion = max(emotions, key=emotions.get)
         confidence = emotions[primary_emotion]
 
-        # XAI objašnjenje
+        # XAI explanation
         xai_explanation = None
         if include_xai:
             xai_explanation = self._generate_explanation(
@@ -109,7 +109,7 @@ class TextEmotionAnalyzer:
         }
 
     def _detect_emotions(self, text: str) -> Dict[str, float]:
-        """Detektuje emocije koristeći DistilRoBERTa model"""
+        """Detects emotions using the DistilRoBERTa model"""
         try:
             classifier = get_emotion_classifier()
             results = classifier(text[:512])[0]  # Max 512 tokena
@@ -124,7 +124,7 @@ class TextEmotionAnalyzer:
 
         except Exception as e:
             print(f"Emotion detection error: {e}")
-            # Fallback: vraća neutral
+            # Fallback: returns neutral
             return {
                 "anger": 0.0,
                 "disgust": 0.0,
@@ -136,12 +136,12 @@ class TextEmotionAnalyzer:
             }
 
     def _analyze_sentiment(self, text: str) -> Dict:
-        """Analizira sentiment teksta"""
+        """Analyzes text sentiment"""
         try:
             analyzer = get_sentiment_analyzer()
             result = analyzer(text[:512])[0]
 
-            # Mapiraj labele
+            # Map labels
             label_mapping = {
                 'positive': 'positive',
                 'negative': 'negative',
@@ -161,7 +161,7 @@ class TextEmotionAnalyzer:
             return {"label": "neutral", "score": 50.0}
 
     def _calculate_metrics(self, text: str) -> Dict:
-        """Izračunava dodatne metrike za tekst"""
+        """Calculates additional metrics for text"""
         try:
             from textblob import TextBlob
             blob = TextBlob(text)
@@ -195,9 +195,9 @@ class TextEmotionAnalyzer:
         confidence: float
     ) -> Dict:
         """
-        Generiše XAI objašnjenje za detektovane emocije.
-        Pokušava SHAP prvo, fallback na keyword analizu.
-        Ovo se prikazuje samo korisnicima u Group B.
+        Generates XAI explanation for detected emotions.
+        Tries SHAP first, falls back to keyword analysis.
+        This is shown only to users in Group B.
         """
         # Try SHAP first
         if self._is_shap_available():
@@ -232,10 +232,10 @@ class TextEmotionAnalyzer:
         confidence: float
     ) -> Dict:
         """
-        Generiše keyword-bazirano XAI objašnjenje (fallback metoda).
-        Ovo se prikazuje samo korisnicima u Group B.
+        Generates keyword-based XAI explanation (fallback method).
+        This is shown only to users in Group B.
         """
-        # Ključne riječi koje ukazuju na emocije
+        # Keywords that indicate emotions
         emotion_keywords = {
             "joy": ["happy", "glad", "excited", "wonderful", "great", "love", "amazing"],
             "sadness": ["sad", "unhappy", "depressed", "down", "lonely", "miss", "cry"],
@@ -246,25 +246,25 @@ class TextEmotionAnalyzer:
             "neutral": []
         }
 
-        # Pronađi ključne riječi u tekstu
+        # Find keywords in text
         text_lower = text.lower()
         found_keywords = []
         for keyword in emotion_keywords.get(primary_emotion, []):
             if keyword in text_lower:
                 found_keywords.append(keyword)
 
-        # Generiši objašnjenje na osnovu emocije
+        # Generate explanation based on emotion
         emotion_explanations = {
-            "joy": "Pozitivne riječi i optimističan ton ukazuju na radost.",
-            "sadness": "Negativne riječi i melanholičan ton sugerišu tugu.",
-            "anger": "Intenzivan jezik i frustracija ukazuju na ljutnju.",
-            "fear": "Zabrinutost i nesigurnost u tekstu ukazuju na strah.",
-            "surprise": "Neočekivanost i čuđenje prisutni su u tekstu.",
-            "disgust": "Negativna reakcija i odbojnost vidljivi su u tekstu.",
-            "neutral": "Tekst ima uravnotežen ton bez izraženih emocija."
+            "joy": "Positive words and an optimistic tone indicate joy.",
+            "sadness": "Negative words and a melancholic tone suggest sadness.",
+            "anger": "Intense language and frustration indicate anger.",
+            "fear": "Worry and uncertainty in the text indicate fear.",
+            "surprise": "Unexpectedness and wonder are present in the text.",
+            "disgust": "A negative reaction and aversion are visible in the text.",
+            "neutral": "The text has a balanced tone without pronounced emotions."
         }
 
-        # Sortiraj emocije po jačini
+        # Sort emotions by intensity
         sorted_emotions = sorted(emotions.items(), key=lambda x: x[1], reverse=True)
         top_3 = sorted_emotions[:3]
 
@@ -273,20 +273,20 @@ class TextEmotionAnalyzer:
             "confidence": confidence,
             "reasoning": emotion_explanations.get(
                 primary_emotion,
-                "Analiza je bazirana na jezičkim obrascima u tekstu."
+                "The analysis is based on linguistic patterns in the text."
             ),
             "key_indicators": found_keywords if found_keywords else ["linguistic patterns"],
             "emotion_breakdown": [
                 {"emotion": e[0], "score": e[1]} for e in top_3
             ],
             "model_used": "distilroberta-emotion",
-            "interpretation": f"Model je analizirao tekst od {len(text.split())} riječi "
-                            f"i detektovao '{primary_emotion}' kao dominantnu emociju "
-                            f"sa {confidence}% sigurnošću."
+            "interpretation": f"The model analyzed text of {len(text.split())} words "
+                            f"and detected '{primary_emotion}' as the dominant emotion "
+                            f"with {confidence}% confidence."
         }
 
     def _empty_result(self) -> Dict:
-        """Vraća prazan rezultat za prazan input"""
+        """Returns an empty result for empty input"""
         return {
             "success": False,
             "error": "Empty text provided",

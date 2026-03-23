@@ -17,15 +17,15 @@ async def analyze_voice(
     session_id: Optional[str] = Form(None)
 ):
     """
-    Analizira audio snimak i vraća emocije sa procentima.
+    Analyzes an audio recording and returns emotions with percentages.
 
-    - **audio**: Audio fajl (WAV, MP3, M4A, OGG)
-    - **include_xai**: Da li uključiti XAI objašnjenja (default: true)
+    - **audio**: Audio file (WAV, MP3, M4A, OGG)
+    - **include_xai**: Whether to include XAI explanations (default: true)
 
     Returns:
-        VoiceAnalysisResult sa emocijama i audio karakteristikama
+        VoiceAnalysisResult with emotions and audio features
     """
-    # Provjeri format
+    # Check format
     allowed_formats = ["audio/wav", "audio/mpeg", "audio/mp3", "audio/m4a",
                        "audio/ogg", "audio/webm", "application/octet-stream"]
 
@@ -37,14 +37,14 @@ async def analyze_voice(
         )
 
     try:
-        # Čitaj audio bytes
+        # Read audio bytes
         audio_data = await audio.read()
 
-        # Provjeri veličinu (max 10MB)
+        # Check size (max 10MB)
         if len(audio_data) > 10 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="Audio file too large (max 10MB)")
 
-        # Analiziraj
+        # Analyze
         result = voice_analyzer.analyze(
             audio_data=audio_data,
             include_xai=include_xai
@@ -61,7 +61,7 @@ async def analyze_voice(
 @router.get("/voice/models")
 async def get_voice_models():
     """
-    Vraća informacije o modelima za voice analizu.
+    Returns information about models used for voice analysis.
     """
     ml_available = voice_analyzer._is_ml_available()
 

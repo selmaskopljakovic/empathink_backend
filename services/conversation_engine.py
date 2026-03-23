@@ -217,11 +217,11 @@ class ConversationEngine:
             )
 
         if gesture and gesture != "none":
-            gesture_text = "da" if gesture == "nod" else "ne"
+            gesture_text = "yes" if gesture == "nod" else "no"
             session["history"].append(
                 {
                     "role": "user",
-                    "text": f"[Korisnik klimnuo glavom: {gesture_text}]",
+                    "text": f"[User head gesture: {gesture_text}]",
                     "timestamp": time.time(),
                 }
             )
@@ -229,8 +229,8 @@ class ConversationEngine:
         # Build context
         time_of_day = self._get_time_of_day()
 
-        emotions_str = "Nije detektovano"
-        primary_emotion = "nepoznato"
+        emotions_str = "Not detected"
+        primary_emotion = "unknown"
         confidence = 0
         if emotions:
             sorted_emotions = sorted(emotions.items(), key=lambda x: x[1], reverse=True)
@@ -249,23 +249,23 @@ class ConversationEngine:
                 surface = masking.get("surface_emotion", "")
                 underlying = masking.get("underlying_emotion", "")
                 masking_context = (
-                    f"- MASKING DETEKTOVAN: {masking_type} "
-                    f"(površinska: {surface}, skrivena: {underlying}). "
-                    f"Pažljivo i nježno adresirati."
+                    f"- MASKING DETECTED: {masking_type} "
+                    f"(surface: {surface}, underlying: {underlying}). "
+                    f"Address carefully and gently."
                 )
                 session["last_masking_mention"] = now
 
         # Gesture context
         gesture_context = ""
         if gesture and gesture != "none":
-            gesture_context = f"- Korisnik je upravo {'klimnuo glavom (DA)' if gesture == 'nod' else 'odmahnuo glavom (NE)'}."
+            gesture_context = f"- User just {'nodded (YES)' if gesture == 'nod' else 'shook head (NO)'}."
 
         # Build conversation history string (last 10 messages)
         history_lines = []
         for msg in session["history"][-10:]:
-            role = "AI" if msg["role"] == "ai" else "Korisnik"
+            role = "AI" if msg["role"] == "ai" else "User"
             history_lines.append(f"{role}: {msg['text']}")
-        conversation_history = "\n".join(history_lines) if history_lines else "Nema prethodnih poruka."
+        conversation_history = "\n".join(history_lines) if history_lines else "No previous messages."
 
         # Generate with Gemini or fallback
         if self._model:
@@ -343,28 +343,28 @@ class ConversationEngine:
             dominant = max(avg_emotions, key=avg_emotions.get)
         else:
             avg_emotions = {}
-            dominant = "nepoznato"
+            dominant = "unknown"
 
         # Try Gemini summary or fallback
         summary_text = (
-            f"Razgovor je trajao {int(duration // 60)} minuta. "
-            f"Razmijenjeno je {message_count} poruka. "
-            f"Dominantna emocija: {dominant}."
+            f"Conversation lasted {int(duration // 60)} minutes. "
+            f"{message_count} messages exchanged. "
+            f"Dominant emotion: {dominant}."
         )
 
         if self._model and len(session["history"]) > 2:
             try:
                 history_text = "\n".join(
                     [
-                        f"{'AI' if m['role'] == 'ai' else 'Korisnik'}: {m['text']}"
+                        f"{'AI' if m['role'] == 'ai' else 'User'}: {m['text']}"
                         for m in session["history"][-20:]
                     ]
                 )
                 prompt = (
-                    f"Napravi kratak rezime ovog razgovora (2-3 rečenice, na BHS jeziku):\n\n"
+                    f"Write a short summary of this conversation (2-3 sentences, in English):\n\n"
                     f"{history_text}\n\n"
-                    f"Dominantna emocija: {dominant}\n"
-                    f"Odgovori samo tekst rezimea, bez JSON formata."
+                    f"Dominant emotion: {dominant}\n"
+                    f"Reply with only the summary text, no JSON format."
                 )
 
                 response = self._model.generate_content(

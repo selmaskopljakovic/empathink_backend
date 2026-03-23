@@ -11,28 +11,28 @@ router = APIRouter()
 
 
 class TextAnalysisRequest(BaseModel):
-    """Request model za text analizu"""
+    """Request model for text analysis"""
     text: str
-    include_xai: bool = True  # Za Group B korisnike
+    include_xai: bool = True  # For Group B users
     user_id: Optional[str] = None
     session_id: Optional[str] = None
 
 
 class QuickAnalysisRequest(BaseModel):
-    """Brza analiza bez XAI"""
+    """Quick analysis without XAI"""
     text: str
 
 
 @router.post("/text")
 async def analyze_text(request: TextAnalysisRequest):
     """
-    Analizira tekst i vraća emocije sa procentima.
+    Analyzes text and returns emotions with percentages.
 
-    - **text**: Tekst za analizu (max 1000 karaktera)
-    - **include_xai**: Da li uključiti XAI objašnjenja (default: true)
+    - **text**: Text to analyze (max 1000 characters)
+    - **include_xai**: Whether to include XAI explanations (default: true)
 
     Returns:
-        EmotionResult sa svim emocijama, sentimentom i XAI objašnjenjima
+        EmotionResult with all emotions, sentiment and XAI explanations
     """
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="Text is required")
@@ -54,8 +54,8 @@ async def analyze_text(request: TextAnalysisRequest):
 @router.post("/text/quick")
 async def quick_analyze_text(request: QuickAnalysisRequest):
     """
-    Brza analiza teksta bez XAI objašnjenja.
-    Koristi se za real-time typing feedback.
+    Quick text analysis without XAI explanations.
+    Used for real-time typing feedback.
     """
     if not request.text or len(request.text) < 3:
         return {
@@ -70,7 +70,7 @@ async def quick_analyze_text(request: QuickAnalysisRequest):
             text=request.text,
             include_xai=False
         )
-        # Vraća samo osnovne podatke za brzinu
+        # Return only basic data for speed
         return {
             "success": True,
             "emotions": result["emotions"],
@@ -90,8 +90,8 @@ async def quick_analyze_text(request: QuickAnalysisRequest):
 @router.get("/text/models")
 async def get_available_models():
     """
-    Vraća informacije o dostupnim modelima za text analizu.
-    Korisno za dokumentaciju i debugging.
+    Returns information about available models for text analysis.
+    Useful for documentation and debugging.
     """
     return {
         "emotion_model": {

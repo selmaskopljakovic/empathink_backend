@@ -9,7 +9,7 @@ from datetime import datetime
 
 
 class EmotionScores(BaseModel):
-    """Emocije sa procentima (0-100)"""
+    """Emotions with percentages (0-100)"""
     anger: float = 0.0
     disgust: float = 0.0
     fear: float = 0.0
@@ -20,20 +20,20 @@ class EmotionScores(BaseModel):
 
 
 class SentimentResult(BaseModel):
-    """Sentiment analiza rezultat"""
+    """Sentiment analysis result"""
     label: str  # positive, negative, neutral
     score: float  # 0-100
 
 
 class TextMetrics(BaseModel):
-    """Dodatne metrike za tekst"""
+    """Additional metrics for text"""
     polarity: float  # -1 to 1
     subjectivity: float  # 0 to 1
     word_count: int
 
 
 class ShapWordImportance(BaseModel):
-    """Pojedinačni doprinos riječi prema SHAP analizi"""
+    """Individual word contribution according to SHAP analysis"""
     word: str
     contribution: float
     direction: str  # "positive" or "negative"
@@ -41,7 +41,7 @@ class ShapWordImportance(BaseModel):
 
 
 class ShapExplanation(BaseModel):
-    """SHAP objašnjenje sa word-level važnostima"""
+    """SHAP explanation with word-level importances"""
     method: str  # "shap_partition"
     model: str  # "distilroberta-emotion"
     target_emotion: str
@@ -51,7 +51,7 @@ class ShapExplanation(BaseModel):
 
 
 class XAIExplanation(BaseModel):
-    """XAI objašnjenje za Group B korisnike"""
+    """XAI explanation for Group B users"""
     method: str
     confidence: float
     reasoning: str
@@ -62,7 +62,7 @@ class XAIExplanation(BaseModel):
 
 
 class TextAnalysisResult(BaseModel):
-    """Rezultat text analize"""
+    """Text analysis result"""
     success: bool = True
     emotions: Dict[str, float]
     primary_emotion: str
@@ -75,7 +75,7 @@ class TextAnalysisResult(BaseModel):
 
 
 class AudioFeatures(BaseModel):
-    """Akustične karakteristike za voice analizu"""
+    """Acoustic features for voice analysis"""
     duration_seconds: float
     energy: float
     pitch_mean: float
@@ -86,7 +86,7 @@ class AudioFeatures(BaseModel):
 
 
 class VoiceAnalysisResult(BaseModel):
-    """Rezultat voice analize"""
+    """Voice analysis result"""
     success: bool = True
     emotions: Dict[str, float]
     primary_emotion: str
@@ -98,7 +98,7 @@ class VoiceAnalysisResult(BaseModel):
 
 
 class FaceBox(BaseModel):
-    """Koordinate detektovanog lica"""
+    """Coordinates of the detected face"""
     x: int
     y: int
     width: int
@@ -106,7 +106,7 @@ class FaceBox(BaseModel):
 
 
 class ImageAnalysisResult(BaseModel):
-    """Rezultat image analize"""
+    """Image analysis result"""
     success: bool = True
     face_detected: bool = True
     emotions: Dict[str, float]
@@ -119,31 +119,31 @@ class ImageAnalysisResult(BaseModel):
 
 
 class MaskingSignal(BaseModel):
-    """Pojedinacni signal maskiranja iz jednog sloja analize"""
+    """Individual masking signal from one analysis layer"""
     layer: str              # "distribution", "temporal", "landmarks"
     type: str               # "fake_smile", "suppressed_anger", etc.
     confidence: float       # 0-1
-    detail: str             # Human-readable opis
+    detail: str             # Human-readable description
 
 
 class MaskingResult(BaseModel):
-    """Rezultat detekcije maskiranih emocija (lazni osmijeh, potisnute emocije)"""
+    """Result of masked emotion detection (fake smile, suppressed emotions)"""
     detected: bool = False
     type: Optional[str] = None                      # "fake_smile", "suppressed_anger", etc.
     confidence: float = 0.0                          # 0-1
-    surface_emotion: Optional[str] = None            # Prikazana emocija
-    underlying_emotion: Optional[str] = None         # Moguca skrivena emocija
-    layers_triggered: List[str] = []                 # Koji slojevi su detektovali
+    surface_emotion: Optional[str] = None            # Displayed emotion
+    underlying_emotion: Optional[str] = None         # Possible hidden emotion
+    layers_triggered: List[str] = []                 # Which layers detected
     num_signals: int = 0
     signals: List[MaskingSignal] = []
-    explanation: Optional[Dict] = None               # XAI objasnjenje
+    explanation: Optional[Dict] = None               # XAI explanation
     au6_score: Optional[float] = None                # Cheek raiser (Duchenne)
     au12_score: Optional[float] = None               # Lip corner puller
-    is_duchenne: Optional[bool] = None               # Da li je Duchenne osmijeh
+    is_duchenne: Optional[bool] = None               # Whether it is a Duchenne smile
 
 
 class LiveFrameResult(BaseModel):
-    """Rezultat jednog frame-a iz live kamere"""
+    """Result of a single frame from the live camera"""
     face_detected: bool
     emotions: Dict[str, float]
     primary_emotion: Optional[str] = None
@@ -154,7 +154,7 @@ class LiveFrameResult(BaseModel):
 
 
 class IncongruenceResult(BaseModel):
-    """Detekcija emocionalne nekongruencije između modaliteta"""
+    """Detection of emotional incongruence between modalities"""
     is_incongruent: bool = False
     overall_score: float = 0.0           # 0-1, higher = more incongruent
     pairwise_similarities: Dict[str, float] = {}  # e.g. {"text_vs_face": 0.72}
@@ -163,7 +163,7 @@ class IncongruenceResult(BaseModel):
 
 
 class FusedEmotionResult(BaseModel):
-    """Kombinovani rezultat iz svih modaliteta sa detekcijom nekongruencije"""
+    """Combined result from all modalities with incongruence detection"""
     success: bool = True
     final_emotions: Dict[str, float]
     primary_emotion: str

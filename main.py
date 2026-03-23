@@ -22,7 +22,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS middleware - dozvoli Flutter app
+# CORS middleware - allow Flutter app
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
