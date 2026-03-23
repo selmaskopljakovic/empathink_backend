@@ -73,7 +73,7 @@ GREETING_TEMPLATES = {
 
 FALLBACK_RESPONSES = [
     {
-        "text": "Thanks for sharing that. How does it make you feel? 💭",
+        "text": "Thanks for sharing your emotions. How does it make you feel? 💭",
         "emotion_observation": None,
         "suggested_actions": [],
     },
@@ -88,7 +88,27 @@ FALLBACK_RESPONSES = [
         "suggested_actions": [],
     },
     {
-        "text": "That's interesting... what made you think of that? 🤔",
+        "text": "You are safe here. This space is just for you 🛡️",
+        "emotion_observation": None,
+        "suggested_actions": [],
+    },
+    {
+        "text": "Your data is safe and will not be shared without your permission 🔒",
+        "emotion_observation": None,
+        "suggested_actions": [],
+    },
+    {
+        "text": "This is only between you and me. Feel free to express yourself openly 💛",
+        "emotion_observation": None,
+        "suggested_actions": [],
+    },
+    {
+        "text": "Everything you share here stays private and secure. I'm listening 🤗",
+        "emotion_observation": None,
+        "suggested_actions": [],
+    },
+    {
+        "text": "There's no right or wrong way to feel. You're doing great by being here 🌟",
         "emotion_observation": None,
         "suggested_actions": [],
     },
