@@ -2,6 +2,18 @@
 Voice Emotion Analyzer Service
 Uses Wav2Vec2 for ML-based speech emotion recognition
 and librosa for acoustic feature extraction (XAI explanations).
+
+Model: superb/wav2vec2-base-superb-er
+  - Trained on IEMOCAP (naturalistic conversational speech)
+  - 4 output labels: neu, hap, ang, sad  (mapped to 4 of 7 Ekman emotions)
+  - Previous model ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition
+    had an uninitialized classifier head (HuggingFace warning: 'classifier.bias,
+    classifier.weight, projector.bias, projector.weight... newly initialized'),
+    which caused near-uniform outputs. See IZVJESTAJ_MULTIMODEL.md for analysis.
+
+Three Ekman emotions (disgust, fear, surprise) are not produced by this model.
+They are returned as 0.0% so the downstream schema stays stable. The heuristic
+fallback in _predict_emotions_heuristic still emits all 7 when ML is unavailable.
 """
 
 import time
@@ -32,7 +44,7 @@ def get_ser_model():
         from transformers import Wav2Vec2ForSequenceClassification, Wav2Vec2FeatureExtractor
         import torch
 
-        model_name = "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
+        model_name = "superb/wav2vec2-base-superb-er"
 
         _ser_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(model_name)
         _ser_model = Wav2Vec2ForSequenceClassification.from_pretrained(model_name)
@@ -59,27 +71,26 @@ def get_ser_model():
 class VoiceEmotionAnalyzer:
     """
     Analyzes audio recordings and detects emotions using:
-    - Wav2Vec2 (ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition)
+    - Wav2Vec2 (superb/wav2vec2-base-superb-er, IEMOCAP-trained)
       for ML-based emotion classification
     - librosa for acoustic feature extraction (XAI explanations)
 
-    Emotions: anger, disgust, fear, joy, sadness, surprise, neutral (7 Ekman)
+    Emotions: anger, disgust, fear, joy, sadness, surprise, neutral (7 Ekman).
+    Note: superb only outputs 4 classes (neu, hap, ang, sad). The other three
+    Ekman emotions (disgust, fear, surprise) are returned as 0.0 from the ML
+    path but populated by the heuristic fallback when ML is unavailable.
     """
 
     # Full 7-emotion set (Ekman model)
     EMOTIONS = ["anger", "disgust", "fear", "joy", "sadness", "surprise", "neutral"]
 
-    # Mapping from Wav2Vec2 model labels to our Ekman labels
-    # ehcalabres model: angry, calm, disgust, fear, happy, neutral, sad, surprise
+    # Mapping from superb/wav2vec2-base-superb-er labels to our Ekman labels.
+    # Model output order (from its config): ['neu', 'hap', 'ang', 'sad']
     EMOTION_MAPPING = {
-        "angry": "anger",
-        "calm": "neutral",
-        "disgust": "disgust",
-        "fear": "fear",
-        "happy": "joy",
-        "neutral": "neutral",
+        "neu": "neutral",
+        "hap": "joy",
+        "ang": "anger",
         "sad": "sadness",
-        "surprise": "surprise",
     }
 
     def __init__(self):
@@ -234,9 +245,9 @@ class VoiceEmotionAnalyzer:
         """
         Predicts emotions using the Wav2Vec2 ML model.
 
-        Model: ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition
-        Trained on: RAVDESS + TESS datasets
-        Labels: angry, calm, disgust, fear, happy, neutral, sad, surprise
+        Model: superb/wav2vec2-base-superb-er
+        Trained on: IEMOCAP (naturalistic conversational speech)
+        Labels: neu, hap, ang, sad  (only 4 of 7 Ekman emotions)
         """
         import torch
 
@@ -253,16 +264,20 @@ class VoiceEmotionAnalyzer:
         # Softmax to get probabilities
         probs = torch.nn.functional.softmax(logits, dim=-1)[0]
 
-        # Map model labels to our Ekman labels
-        # Model label order: angry, calm, disgust, fear, happy, neutral, sad, surprise
-        model_labels = ["angry", "calm", "disgust", "fear", "happy", "neutral", "sad", "surprise"]
+        # Read label ordering directly from the model config instead of hardcoding
+        # so that any future checkpoint change stays correct.
+        id2label = getattr(model.config, "id2label", None) or {
+            0: "neu", 1: "hap", 2: "ang", 3: "sad",
+        }
+        model_labels = [id2label[i].lower() for i in range(len(id2label))]
 
-        # Aggregate into our 7 Ekman emotions
+        # Aggregate into our 7 Ekman emotions. Labels not in mapping (e.g., if a
+        # future model adds classes we don't recognise) are silently skipped.
         emotion_scores = {e: 0.0 for e in self.EMOTIONS}
-
         for i, label in enumerate(model_labels):
-            mapped = self.EMOTION_MAPPING.get(label, "neutral")
-            emotion_scores[mapped] += float(probs[i].item())
+            mapped = self.EMOTION_MAPPING.get(label)
+            if mapped is not None:
+                emotion_scores[mapped] += float(probs[i].item())
 
         # Convert to percentages and round
         total = sum(emotion_scores.values())
